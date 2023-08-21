@@ -4,11 +4,36 @@ vali_dir = r"F:\DigitalAG\morocco\unet\baseline\32\validation\img"
 model_dir = r"F:\DigitalAG\morocco\unet\baseline\32\model"
 
 viz_param = {
-    "CIG": {"ylim": (0, 4.6), "yticks": [0, 1, 2, 3, 4]},
-    "NDVI": {"ylim": (0, 1), "yticks": [0, 0.2, 0.4, 0.6, 0.8]},
-    "EVI": {"ylim": (-0.2, 0.6), "yticks": [-0.2, 0, 0.2, 0.4, 0.6]},
-    "LSWI": {"ylim": (-0.4, 0.4), "yticks": [-0.4, -0.2, 0, 0.2, 0.4]},
-    "OSAVI": {"ylim": (0, 0.6), "yticks": [0, 0.15, 0.3, 0.45, 0.6]},
+    "CIG": {
+        "ylim": (0, 4.6),
+        "ylim_ratio": (2, 6),
+        "yticks": [0, 1, 2, 3, 4],
+        "yticks_ratio": [2, 3, 4, 5, 6],
+    },
+    "NDVI": {
+        "ylim": (0, 0.8),
+        "yticks": [0, 0.2, 0.4, 0.6, 0.8],
+        "ylim_ratio": (0, 1.5),
+        "yticks_ratio": [0, 0.3, 0.6, 0.9, 1.2, 1.5],
+    },
+    "EVI": {
+        "ylim": (-0.2, 0.6),
+        "ylim_ratio": (0, 0.8),
+        "yticks": [-0.2, 0, 0.2, 0.4, 0.6],
+        "yticks_ratio": [0, 0.2, 0.4, 0.6, 0.8],
+    },
+    "LSWI": {
+        "ylim": (-0.4, 0.4),
+        "ylim_ratio": (0, 0.6),
+        "yticks": [-0.4, -0.2, 0, 0.2, 0.4],
+        "yticks_ratio": [0, 0.15, 0.3, 0.45, 0.6],
+    },
+    "OSAVI": {
+        "ylim": (0, 0.6),
+        "ylim_ratio": (0, 1),
+        "yticks": [0, 0.15, 0.3, 0.45, 0.6],
+        "yticks_ratio": [0, 0.25, 0.5, 0.75, 1],
+    },
 }
 
 cuda = True
