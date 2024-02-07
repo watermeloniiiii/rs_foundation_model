@@ -37,8 +37,9 @@ viz_param = {
 }
 
 cuda = True
-mode = "shallow"
-if mode == "vit":
+mode = "run"
+model = "shallow"
+if model == "vit":
     general = dict(
         mode="vit",
         optimizer="Adam_StepLR",
@@ -67,7 +68,7 @@ if mode == "vit":
         dropout=0,
         emb_dropout=0,
     )
-if mode == "unet":
+if model == "unet":
     general = dict(mode="unet", optimizer="SGD_CLR", model_index="unet_1", info="NA")
     hyperparameters = dict(
         bands=3,
@@ -81,7 +82,7 @@ if mode == "unet":
         weight=[1, 5],
         dropout=0.3,
     )
-if mode == "shallow":
+if model == "shallow":
     general = dict(
         mode="shallow", optimizer="SGD_CLR", model_index="shallow_32_1", info="NA"
     )
@@ -98,7 +99,7 @@ if mode == "shallow":
         weight=[1, 5],
         dropout=0.3,
     )
-if mode == "pretrain":
+if model == "pretrain":
     general = dict(
         mode="pretrain",
         optimizer="SGD_CLR",
