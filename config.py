@@ -2,6 +2,9 @@ root_dir = r"F:\DigitalAG\morocco\unet"
 train_dir = r"F:\DigitalAG\morocco\unet\baseline\32\training\img"
 vali_dir = r"F:\DigitalAG\morocco\unet\baseline\32\validation\img"
 model_dir = r"F:\DigitalAG\morocco\unet\baseline\32\model"
+customized_weight = False
+weight = [1, 5]
+stats = None
 
 viz_param = {
     "CIG": {
