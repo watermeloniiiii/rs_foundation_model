@@ -4,7 +4,8 @@ vali_dir = r"F:\DigitalAG\morocco\unet\baseline\32\validation\img"
 model_dir = r"F:\DigitalAG\morocco\unet\baseline\32\model"
 customized_weight = False
 weight = [1, 5]
-stats = None
+STATS_MEAN = [125.60012727962095, 125.66049125060024, 125.5652544331012]
+STATS_STD = [53.85292217467926, 55.29551905929324, 56.7204846663869]
 
 viz_param = {
     "CIG": {
@@ -41,7 +42,7 @@ viz_param = {
 
 cuda = True
 mode = "run"
-model = "shallow"
+model = "unet"
 if model == "vit":
     general = dict(
         mode="vit",

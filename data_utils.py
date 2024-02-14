@@ -26,10 +26,14 @@ class patch_generator:
         label_block = list(RasterDatasetPerBlockTraverser(label, x, y, 56, 56, boundary_treatment="shift").traverse())
         for idx, (img, _, _) in enumerate(image_block):
             if img.data.dtype == 'uint8':
+                if mode == "training" and (img.data == 255).any():
+                    continue
                 img.data[img.data == 255] = 0
                 stretched = color_stretch_normal(img.data, dest_min=0, dest_max=255)
                 img.data = stretched
             if img.data.dtype == 'uint16':
+                if mode == "training" and (img.data == 65535).any():
+                    continue
                 img.data[img.data == 65535] = 0
                 stretched = color_stretch_normal(img.data, dest_min=0, dest_max=255)
                 img.data = stretched
@@ -45,6 +49,7 @@ class patch_generator:
             if not os.path.exists(os.path.join(label_out_dir, f"{unique_id}_{idx}.tif")):
                 lbl.to_geotiff(os.path.join(label_out_dir, f"{unique_id}_{idx}.tif"))
             if augment:
+                random.seed(1001)
                 rotate_angle = random.choice([90, 180, 270], 1, [1/3] * 3)[0]
                 directions = {0: "horizon", 1: "vertical", 2: "horizon_vertical"}
                 flip_direction = directions[random.choice(3, 1, [1/3] * 3)[0]]

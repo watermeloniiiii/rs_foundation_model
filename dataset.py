@@ -1,17 +1,20 @@
 from typing import Iterator, List, Literal
-import pickle
 import numpy as np
-import torch
 import torch.distributed as dist
+import os
 from multiprocessing.pool import ThreadPool
 
 import datetime
 from tqdm import tqdm as tqdm
 from torch.utils.data import Dataset
+import pytorch_lightning as pl
+from torch.utils.data.dataloader import DataLoader
+import torch
 
 from common.geoimage.raster_dataset import RasterDataset
 from common.img_utils.img_geom import rotate, flip
 import config as config
+from config import (STATS_MEAN, STATS_STD)
 
 class UnetDataset(Dataset):
     def __init__(
@@ -31,24 +34,35 @@ class UnetDataset(Dataset):
             the list contains the crop names that will be used, e.g., ["negative", "corn", "soybeans"]
             make sure the crop name is consistent with the training labels
         max_process_num: int,
+        data_type: str, by default "train"
         """
         super().__init__()
 
         self.filepath_lst = sorted(filepath_lst)
         self.class_of_interests = class_of_interest
         self.process_num = max_process_num
-        # self.sample_cnt = self._build_crop_cnt_list()
+        self.sample_cnt = self._build_crop_cnt_list()
         if data_type != "test":
             self.filepath_lst_tgt = [p.replace("image", "label") for p in self.filepath_lst]
-        # if not config.customized_weight:
-        #     self.weight_list = [i / sum(list(self.sample_cnt.values())) for i in list(self.sample_cnt.values())]
-        # else:
-        #     self.weight_list = [i / sum(config.weight) for i in config.weight]
-        if config.stats:
-            self.mean = config.stats["mean"]
-            self.std = config.stats["std"]
+        if not config.customized_weight:
+            self.weight_list = [i / sum(list(self.sample_cnt.values())) for i in list(self.sample_cnt.values())]
+        else:
+            self.weight_list = [i / sum(config.weight) for i in config.weight]
+        if STATS_MEAN or STATS_STD:
+            self.mean = STATS_MEAN
+            self.std = STATS_STD
         else:
             self.mean, self.std = self._get_stats()
+
+    def _scale_percentile_img(self, matrix):
+        # matrix = matrix.transpose(2, 0, 1).astype(np.float)
+        d, w, h = matrix.shape
+        for i in range(d):
+            mins = np.percentile(matrix[i][matrix[i] != 0], 1)
+            maxs = np.percentile(matrix[i], 99)
+            matrix[i] = matrix[i].clip(mins, maxs)
+            matrix[i] = ((matrix[i] - mins) / (maxs - mins))
+        return matrix
 
     def _get_mean_and_std(self, filepath, stats, band_names):
         file = RasterDataset.from_file(filepath).data
@@ -61,7 +75,7 @@ class UnetDataset(Dataset):
         return stats     
 
     def _get_stats(self):
-        pool = ThreadPool(80)
+        pool = ThreadPool(30)
         pbar = tqdm(total=len(self.filepath_lst))
         band_names = {0: "red", 1: "green", 2: "blue"}
         stats = {}
@@ -77,9 +91,8 @@ class UnetDataset(Dataset):
             )
         pool.close()
         pool.join()
-        overall_mean = np.mean(stats["mean"])
-        overall_std = np.std(stats["mean"])
-        print (overall_mean, overall_std)
+        overall_mean = [np.mean(stats[band]["mean"]) for band in band_names.values()]
+        overall_std = [np.mean(stats[band]["std"]) for band in band_names.values()]
         return (overall_mean, overall_std)
 
     def _get_sample_count(self, filepath, sample_count):
@@ -115,26 +128,46 @@ class UnetDataset(Dataset):
         return len(self.filepath_lst)
 
     def __getitem__(self, index):
-        if self.filepath_lst[index].endswith('tif'):
-            image = RasterDataset.from_file(self.filepath_lst[index]).data
-            if len(image.shape) == 2:
-                image = image[:, :, np.newaxis]
-            if self.scale:
-                image = self.scale_percentile_n(image)
-            sample = {}
-            sample['image'] = image
-            sample['patch'] = self.img_list[index].split('.')[0]
-            sample['name'] = self.img_list[index]
-            if self.target:
-                target = io.imread(os.path.join(self.dir.replace('img', 'target'), self.target_list[index]))
-                sample['label'] = target
-
-            if self.transform:
-                sample = self.transform(sample)
-            return sample
+        image = RasterDataset.from_file(self.filepath_lst[index])
+        # standardization
+        image.data = (image.data - np.array(STATS_MEAN)[:, None, None]) / np.array(STATS_STD)[:, None, None]
+        sample = {}
+        sample['image'] = image.data
+        sample['id'] = self.filepath_lst[index].split('/')[-1].split(".")[0]
+        if self.filepath_lst_tgt:
+            target = RasterDataset.from_file(self.filepath_lst_tgt[index])
+            sample['mask'] = target.data
+        return sample
     
-    def get_class_of_interests(self):
-        return self.class_of_interests
+class UnetDataModule(pl.LightningDataModule):
+    def __init__(self, data_dir: str = "", 
+                 batch_size: int = 32):
+        super().__init__()
+        self.data_dir = data_dir
+        self.batch_size = batch_size
+
+    def work_through_folder(self, dir, exclude=""):
+        train_fpath_list = []
+        for root, _, files in os.walk(dir):
+            if files == []:
+                continue
+            for filename in files:
+                if filename.endswith(".tif") and "label" not in root:
+                    if any([e in root for e in exclude]):
+                        continue
+                    train_fpath_list.append(os.path.join(root, filename))
+        return train_fpath_list
+
+
+    def setup(self, stage: str):
+        # self.unet_train = UnetDataset(filepath_lst=self.work_through_folder(self.data_dir, ["region4"]), class_of_interest=["negative", "olive"])
+        self.unet_val = UnetDataset(filepath_lst=self.work_through_folder(self.data_dir, ["region1", "region2", "region3"]), class_of_interest=["negative", "olive"])
+
+    def train_dataloader(self):
+        return DataLoader(self.unet_train, batch_size=self.batch_size)
+
+    def val_dataloader(self):
+        return DataLoader(self.unet_val, batch_size=self.batch_size)
 
 
 if __name__ == "__main__":
@@ -143,28 +176,4 @@ if __name__ == "__main__":
     import torch
 
     train_data_root = "/NAS6/Members/linchenxi/projects/morocco/data/patch"
-    exclude_region = ""
-    train_fpath_list = []
-    for root, dirs, files in os.walk(train_data_root):
-        if files == []:
-            continue
-        for filename in files:
-            if filename.endswith(".tif") and "label" not in root:
-                if exclude_region not in root:
-                    continue
-                train_fpath_list.append(os.path.join(root, filename))
-
-    class_of_interests = ["negative", "olive"]
-
-    train_dataset = UnetDataset(
-        train_fpath_list, class_of_interests, max_process_num=1
-    )
-
-    data_loader = DataLoader(train_dataset)
-
-    for val in data_loader:
-        data_x, data_x_mask, data_y, data_y_weight = val
-        if torch.sum(data_y) > 1:
-            print
-        else:
-            print
+    test_module = UnetDataModule(data_dir=train_data_root)
