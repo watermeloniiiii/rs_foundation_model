@@ -1,0 +1,5 @@
+{
+    "python.analysis.typeCheckingMode": "off",
+    "debugpy.debugJustMyCode": false,
+    "jupyter.debugJustMyCode": false
+}

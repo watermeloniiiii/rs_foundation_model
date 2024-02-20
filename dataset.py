@@ -13,8 +13,10 @@ import torch
 
 from common.geoimage.raster_dataset import RasterDataset
 from common.img_utils.img_geom import rotate, flip
+from common.logger import logger
 import config as config
-from config import (STATS_MEAN, STATS_STD)
+from config import STATS_MEAN, STATS_STD
+
 
 class UnetDataset(Dataset):
     def __init__(
@@ -22,7 +24,7 @@ class UnetDataset(Dataset):
         filepath_lst: List[str],
         class_of_interest: List[str],
         max_process_num: int = 10,
-        data_type: str = "train"
+        data_type: str = "train",
     ) -> None:
         """the iterarable dataset used for training
 
@@ -41,13 +43,25 @@ class UnetDataset(Dataset):
         self.filepath_lst = sorted(filepath_lst)
         self.class_of_interests = class_of_interest
         self.process_num = max_process_num
-        self.sample_cnt = self._build_crop_cnt_list()
+        self.data_type = data_type
         if data_type != "test":
-            self.filepath_lst_tgt = [p.replace("image", "label") for p in self.filepath_lst]
-        if not config.customized_weight:
-            self.weight_list = [i / sum(list(self.sample_cnt.values())) for i in list(self.sample_cnt.values())]
-        else:
-            self.weight_list = [i / sum(config.weight) for i in config.weight]
+            self.sample_cnt = self._build_crop_cnt_list()
+            self.filepath_lst_tgt = [
+                p.replace("image", "label") for p in self.filepath_lst
+            ]
+            if not config.customized_weight:
+                self.weight_list = [
+                    i / sum(list(self.sample_cnt.values()))
+                    for i in list(self.sample_cnt.values())
+                ]
+                logger.info(
+                    f"The weights among all classes are {self.weight_list} based on calculation"
+                )
+            else:
+                self.weight_list = [
+                    i / sum(config.hyperparameters["weight"])
+                    for i in config.hyperparameters["weight"]
+                ]
         if STATS_MEAN or STATS_STD:
             self.mean = STATS_MEAN
             self.std = STATS_STD
@@ -61,24 +75,25 @@ class UnetDataset(Dataset):
             mins = np.percentile(matrix[i][matrix[i] != 0], 1)
             maxs = np.percentile(matrix[i], 99)
             matrix[i] = matrix[i].clip(mins, maxs)
-            matrix[i] = ((matrix[i] - mins) / (maxs - mins))
+            matrix[i] = (matrix[i] - mins) / (maxs - mins)
         return matrix
 
     def _get_mean_and_std(self, filepath, stats, band_names):
         file = RasterDataset.from_file(filepath).data
         for band in range(file.shape[0]):
             band_name = band_names[band]
-            if  band_name not in stats:
+            if band_name not in stats:
                 stats[band_name] = {"mean": [], "std": []}
             stats[band_name]["mean"].append(np.mean(file[band]))
             stats[band_name]["std"].append(np.std(file[band]))
-        return stats     
+        return stats
 
     def _get_stats(self):
         pool = ThreadPool(30)
         pbar = tqdm(total=len(self.filepath_lst))
         band_names = {0: "red", 1: "green", 2: "blue"}
         stats = {}
+
         def update_pbar(arg=None):
             pbar.update(1)
 
@@ -97,13 +112,13 @@ class UnetDataset(Dataset):
 
     def _get_sample_count(self, filepath, sample_count):
         file = RasterDataset.from_file(filepath.replace("image", "label"))
-        file.data[file.data>=len(self.class_of_interests)] == 0
+        file.data[file.data >= len(self.class_of_interests)] == 0
         for c_val, c in enumerate(self.class_of_interests):
             if c not in sample_count:
-                sample_count[c] = (file.data==c_val).sum()
+                sample_count[c] = (file.data == c_val).sum()
             else:
-                sample_count[c] += (file.data==c_val).sum()
-        
+                sample_count[c] += (file.data == c_val).sum()
+
     def _build_crop_cnt_list(self):
         sample_count = {}
         pool = ThreadPool(self.process_num)
@@ -130,18 +145,36 @@ class UnetDataset(Dataset):
     def __getitem__(self, index):
         image = RasterDataset.from_file(self.filepath_lst[index])
         # standardization
-        image.data = (image.data - np.array(STATS_MEAN)[:, None, None]) / np.array(STATS_STD)[:, None, None]
+        image.data = (image.data - np.array(STATS_MEAN)[:, None, None]) / np.array(
+            STATS_STD
+        )[:, None, None]
+        image.data = self._scale_percentile_img(image.data)
         sample = {}
-        sample['image'] = image.data
-        sample['id'] = self.filepath_lst[index].split('/')[-1].split(".")[0]
-        if self.filepath_lst_tgt:
+        sample["image"] = image.data.astype(np.double)
+        sample["id"] = self.filepath_lst[index].split("/")[-1].split(".")[0]
+        if self.data_type != "test":
             target = RasterDataset.from_file(self.filepath_lst_tgt[index])
-            sample['mask'] = target.data
+            sample["label"] = target.data
+        if self.data_type == "test":
+            sample["meta"] = image.meta
         return sample
-    
+
+    @staticmethod
+    def work_through_folder(dir, include=""):
+        train_fpath_list = []
+        for root, _, files in os.walk(dir):
+            if files == []:
+                continue
+            for filename in files:
+                if filename.endswith(".tif") and "label" not in root:
+                    if all([e not in root for e in include]):
+                        continue
+                    train_fpath_list.append(os.path.join(root, filename))
+        return train_fpath_list
+
+
 class UnetDataModule(pl.LightningDataModule):
-    def __init__(self, data_dir: str = "", 
-                 batch_size: int = 32):
+    def __init__(self, data_dir: str = "", batch_size: int = 32):
         super().__init__()
         self.data_dir = data_dir
         self.batch_size = batch_size
@@ -158,10 +191,17 @@ class UnetDataModule(pl.LightningDataModule):
                     train_fpath_list.append(os.path.join(root, filename))
         return train_fpath_list
 
-
     def setup(self, stage: str):
-        # self.unet_train = UnetDataset(filepath_lst=self.work_through_folder(self.data_dir, ["region4"]), class_of_interest=["negative", "olive"])
-        self.unet_val = UnetDataset(filepath_lst=self.work_through_folder(self.data_dir, ["region1", "region2", "region3"]), class_of_interest=["negative", "olive"])
+        self.unet_train = UnetDataset(
+            filepath_lst=self.work_through_folder(self.data_dir, ["region4"]),
+            class_of_interest=["negative", "olive"],
+        )
+        self.unet_val = UnetDataset(
+            filepath_lst=self.work_through_folder(
+                self.data_dir, ["region1", "region2", "region3"]
+            ),
+            class_of_interest=["negative", "olive"],
+        )
 
     def train_dataloader(self):
         return DataLoader(self.unet_train, batch_size=self.batch_size)
