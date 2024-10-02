@@ -20,10 +20,15 @@ from typing import List
 from accelerate import DistributedDataParallelKwargs
 from accelerate import Accelerator
 from accelerate.utils import DummyOptim, DummyScheduler
-import deepspeed
+from collections import defaultdict
 
 # from sklearn.metrics import confusion_matrix, precision_score, recall_score
-from torchmetrics.classification import BinaryJaccardIndex
+from torchmetrics.classification import (
+    BinaryJaccardIndex,
+    BinaryPrecision,
+    BinaryRecall,
+    BinaryF1Score,
+)
 from torchmetrics.segmentation import MeanIoU
 from torch.optim.lr_scheduler import (
     StepLR,
@@ -222,24 +227,25 @@ class Trainer(object):
                 )
             return DummyScheduler(self.optimizer)
 
+    def process_model(self, model_type, net, inputs, input_values, tensor_type):
+        if model_type in ["maskformer", "mask2former"]:
+            pixel_values = input_values[inputs.index("pixel_values")].type(tensor_type)
+            mask_labels = input_values[inputs.index("mask_labels")]
+            class_labels = input_values[inputs.index("class_labels")]
+            outputs = net(pixel_values, mask_labels, class_labels)
 
-    def _make_patch_labels_for_classification(
-        self,
-        arr: torch.Tensor,
-        img_size: int = 224,
-        patch_size: int = 32,
-        threshold: float = 0.1,
-    ):
-        patch_labels = []
-        for i in range(0, img_size, patch_size):
-            for j in range(0, img_size, patch_size):
-                # Extract the 16x16 grid
-                grid = arr[:, :, i : i + patch_size, j : j + patch_size]
-                patch_labels.append(
-                    (grid.mean(axis=[2, 3]) > threshold).type(torch.cuda.LongTensor)
-                )
-        patch_labels = torch.stack(patch_labels, dim=1)
-        return patch_labels
+        elif model_type == "segformer":
+            image = input_values[inputs.index("image")].type(tensor_type)
+            label = input_values[inputs.index("label")].squeeze()
+            outputs = net(image, label)
+
+        elif model_type == "dinov2":
+            image = input_values[inputs.index("image")].type(tensor_type)
+            label = input_values[inputs.index("label")].squeeze()
+            date = input_values[inputs.index("date")].squeeze()
+            outputs = net(image, label, date)
+
+        return outputs.loss, outputs
 
     def training(self, epoch):
         self.net.train()
@@ -272,84 +278,9 @@ class Trainer(object):
                     if self.accelerator.device.type == "cuda"
                     else torch.FloatTensor
                 )
-                if MODEL_TYPE in ["maskformer", "mask2former"]:
-                    outputs = self.net(
-                        input_values[inputs.index("pixel_values")].type(tensor_type),
-                        input_values[inputs.index("mask_labels")],
-                        input_values[inputs.index("class_labels")],
-                    )
-                    loss = outputs.loss
-                if MODEL_TYPE in ["segformer"]:
-                    outputs = self.net(
-                        input_values[inputs.index("image")].type(tensor_type),
-                        input_values[inputs.index("label")].squeeze(),
-                    )
-                    loss = outputs.loss
-                if MODEL_TYPE in ["dinov2"]:
-                    outputs = self.net(
-                        input_values[inputs.index("image")].type(tensor_type),
-                        input_values[inputs.index("label")].squeeze(),
-                        input_values[inputs.index("date")].squeeze(),
-                    )
-                    loss = outputs.loss
-                if MODEL_TYPE in ["unet"]:
-                    outputs = self.net(
-                        input_values[inputs.index("image")].type(tensor_type)
-                    )
-                    labels = input_values[inputs.index("label")].squeeze()
-                    pos_weight = torch.tensor(config.HYPERPARAM["weight"][0]).type(
-                        torch.FloatTensor
-                    )
-                    pos_weight = pos_weight.cuda() if config.cuda else pos_weight
-                    if config.MODEL_CONFIG["num_classes"] > 1:
-                        loss_fct = CrossEntropyLoss(
-                            ignore_index=self.config.semantic_loss_ignore_index,
-                            pos_weight=pos_weight,
-                        )
-                        loss = loss_fct(outputs, labels)
-                    elif config.MODEL_CONFIG["num_classes"] == 1:
-                        loss_fct = BCEWithLogitsLoss(
-                            reduction="none", pos_weight=pos_weight
-                        )
-                        loss = loss_fct(outputs.squeeze(1), labels.float())
-                        loss = loss.mean()
-                    else:
-                        raise ValueError(
-                            f"Number of labels should be >=0: {self.config.num_labels}"
-                        )
-                if MODEL_TYPE == "vit":
-                    """
-                    1. label is at pixel level, need to convert to image level
-                    2. need to plus patch level loss to the total loss
-                    """
-                    labels = (
-                        torch.mean(input_values[inputs.index("label")], dim=(2, 3))
-                        > 0.1
-                    ).type(torch.cuda.LongTensor)
-                    patch_labels = self._make_patch_labels_for_classification(
-                        arr=input_values[inputs.index("label")],
-                        img_size=224,
-                        patch_size=32,
-                        threshold=0.05,
-                    )
-                    outputs = self.net(
-                        pixel_values=input_values[inputs.index("image")].type(
-                            tensor_type
-                        ),
-                        labels=labels,
-                    )
-                    patch_logits = outputs.all_logits[:, 1:, :]
-                    pos_weight = torch.tensor(config.HYPERPARAM["weight"][0]).type(
-                        torch.FloatTensor
-                    )
-                    loss_fct = CrossEntropyLoss(
-                        weight=torch.tensor([1, pos_weight]).cuda()
-                    )
-                    patch_loss = loss_fct(
-                        patch_logits.reshape(-1, 2),
-                        torch.tensor(patch_labels).type(torch.cuda.LongTensor).view(-1),
-                    )
-                    loss = outputs.loss + patch_loss
+                loss, _ = self.process_model(
+                    MODEL_TYPE, self.net, inputs, input_values, tensor_type
+                )
                 gathered_loss = self.accelerator.gather_for_metrics(loss)
                 self.train_loss[epoch] += torch.mean(gathered_loss)
                 self.accelerator.backward(loss)
@@ -386,84 +317,9 @@ class Trainer(object):
                     if self.accelerator.device.type == "cuda"
                     else torch.FloatTensor
                 )
-                if MODEL_TYPE in ["maskformer", "mask2former"]:
-                    outputs = self.net(
-                        input_values[inputs.index("pixel_values")].type(tensor_type),
-                        input_values[inputs.index("mask_labels")],
-                        input_values[inputs.index("class_labels")],
-                    )
-                    loss = outputs.loss
-                if MODEL_TYPE in ["segformer"]:
-                    outputs = self.net(
-                        input_values[inputs.index("image")].type(tensor_type),
-                        input_values[inputs.index("label")].squeeze(),
-                    )
-                    loss = outputs.loss
-                if MODEL_TYPE in ["dinov2"]:
-                    outputs = self.net(
-                        input_values[inputs.index("image")].type(tensor_type),
-                        input_values[inputs.index("label")].squeeze(),
-                        input_values[inputs.index("date")].squeeze(),
-                    )
-                    loss = outputs.loss
-                if MODEL_TYPE in ["unet"]:
-                    outputs = self.net(
-                        input_values[inputs.index("image")].type(tensor_type)
-                    )
-                    labels = input_values[inputs.index("label")].squeeze()
-                    pos_weight = torch.tensor(config.HYPERPARAM["weight"][0]).type(
-                        torch.FloatTensor
-                    )
-                    pos_weight = pos_weight.cuda() if config.cuda else pos_weight
-                    if config.MODEL_CONFIG["num_classes"] > 1:
-                        loss_fct = CrossEntropyLoss(
-                            ignore_index=self.config.semantic_loss_ignore_index,
-                            pos_weight=pos_weight,
-                        )
-                        loss = loss_fct(outputs, labels)
-                    elif config.MODEL_CONFIG["num_classes"] == 1:
-                        loss_fct = BCEWithLogitsLoss(
-                            reduction="none", pos_weight=pos_weight
-                        )
-                        loss = loss_fct(outputs.squeeze(1), labels.float())
-                        loss = loss.mean()
-                    else:
-                        raise ValueError(
-                            f"Number of labels should be >=0: {self.config.num_labels}"
-                        )
-                if MODEL_TYPE == "vit":
-                    """
-                    1. label is at pixel level, need to convert to image level
-                    2. need to plus patch level loss to the total loss
-                    """
-                    labels = (
-                        torch.mean(input_values[inputs.index("label")], dim=(2, 3))
-                        > 0.1
-                    ).type(torch.cuda.LongTensor)
-                    patch_labels = self._make_patch_labels_for_classification(
-                        arr=input_values[inputs.index("label")],
-                        img_size=224,
-                        patch_size=32,
-                        threshold=0.05,
-                    )
-                    outputs = self.net(
-                        pixel_values=input_values[inputs.index("image")].type(
-                            tensor_type
-                        ),
-                        labels=labels,
-                    )
-                    patch_logits = outputs.all_logits[:, 1:, :]
-                    pos_weight = torch.tensor(config.HYPERPARAM["weight"][0]).type(
-                        torch.FloatTensor
-                    )
-                    loss_fct = CrossEntropyLoss(
-                        weight=torch.tensor([1, pos_weight]).cuda()
-                    )
-                    patch_loss = loss_fct(
-                        patch_logits.reshape(-1, 2),
-                        torch.tensor(patch_labels).type(torch.cuda.LongTensor).view(-1),
-                    )
-                    loss = outputs.loss + patch_loss
+                loss, outputs = self.process_model(
+                    MODEL_TYPE, self.net, inputs, input_values, tensor_type
+                )
                 if TASK == "segmentation" and MODEL_TYPE not in ["unet"]:
                     outputs = IMAGE_PROCESSOR[
                         MODEL_TYPE
@@ -478,7 +334,7 @@ class Trainer(object):
                         * input_values[0].shape[0],
                     )  # B, C, H, W
                     prediction = torch.stack(outputs, dim=0)
-                elif TASK == "segmentation" and MODEL_TYPE in ["unet", "dinov2"]:
+                elif TASK == "segmentation" and MODEL_TYPE in ["dinov2"]:
                     prediction = (torch.nn.functional.sigmoid(outputs) > 0.5).to(
                         torch.long
                     )
@@ -488,7 +344,10 @@ class Trainer(object):
                     ), torch.argmax(outputs.all_logits, dim=1).type(
                         torch.cuda.LongTensor
                     )
-                IOU_metric = MeanIoU(num_classes=12).cuda()
+                IOU_metric = MeanIoU(num_classes=2).cuda()
+                Precision_metric = BinaryPrecision().cuda()
+                Recall_metric = BinaryRecall().cuda()
+                F1_metric = BinaryF1Score().cuda()
                 labels = (
                     input_values[inputs.index("label")]
                     if MODEL_TYPE != "vit"
@@ -498,18 +357,29 @@ class Trainer(object):
                     labels = labels.squeeze()
                     prediction = prediction.squeeze()
                 IOU = IOU_metric(prediction, labels.type(torch.cuda.LongTensor))
-                IOU_gathered, gathered_loss = self.accelerator.gather_for_metrics(
-                    (IOU, loss)
+                Precision = Precision_metric(
+                    prediction, labels.type(torch.cuda.LongTensor)
                 )
-                self.vali_loss[epoch] += torch.mean(gathered_loss)
-                self.metric[epoch] += torch.mean(IOU_gathered)
+                Recall = Recall_metric(prediction, labels.type(torch.cuda.LongTensor))
+                F1 = F1_metric(prediction, labels.type(torch.cuda.LongTensor))
+                gathered_metrics = self.accelerator.gather_for_metrics(
+                    (IOU, Precision, Recall, F1, loss)
+                )
+                self.vali_loss[epoch] += torch.mean(gathered_metrics[-1])
+                for m_idx, m in enumerate(["IOU", "Precision", "Recall", "F1"]):
+                    self.metric[m][epoch] += torch.mean(gathered_metrics[m_idx])
 
             if self.accelerator.is_local_main_process:
                 self.accelerator.log(
                     {
                         "vali_loss": self.vali_loss[epoch].item()
                         / len(self.vali_loader),
-                        "iou": self.metric[epoch].item() / len(self.vali_loader),
+                        "iou": self.metric["IOU"][epoch].item() / len(self.vali_loader),
+                        "precision": self.metric["Precision"][epoch].item()
+                        / len(self.vali_loader),
+                        "recall": self.metric["Recall"][epoch].item()
+                        / len(self.vali_loader),
+                        "f1": self.metric["F1"][epoch].item() / len(self.vali_loader),
                     },
                     step=self.cur_step,
                 )
@@ -548,7 +418,7 @@ class Trainer(object):
         self.scheduler = self._select_scheduler()
         self.train_loss = np.zeros([epoch])
         self.vali_loss = np.zeros([epoch])
-        self.metric = np.zeros([epoch])
+        self.metric = defaultdict(lambda: np.zeros([epoch]))
         self.best_loss = None
         self.login = False
 
