@@ -17,7 +17,34 @@
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal",
-            "justMyCode": true
-        }
+            "justMyCode": false
+        },
+        {
+            "name": "Python: Debug DeepSpeed",
+            "type": "debugpy",
+            "request": "launch",
+            "justMyCode": false,
+            "console": "integratedTerminal",
+            "module": "accelerate.commands.launch",
+            "args": [
+                "--config_file",
+                "/NAS6/Members/linchenxi/morocco/config/accelerate_deepspeed_config.yaml",
+                "main/main_accelerate.py",
+            ]
+        },
+        {
+            "name": "Python: Inference DeepSpeed",
+            "type": "debugpy",
+            "request": "launch",
+            "justMyCode": false,
+            "console": "integratedTerminal",
+            "program": "/NAS6/Members/linchenxi/morocco/venv/bin/deepspeed",
+            "args": [
+                "main/inference.py",
+                "--deepspeed",
+                "--deepspeed_config",
+                "/NAS6/Members/linchenxi/morocco/config/config_deepspeed.json"
+            ]
+        },
     ]
 }

@@ -8,46 +8,56 @@ import os
 import time
 import torch
 import wandb
-import config
 import numpy as np
 import torch.optim as optim
 import torch.utils as utils
-from dataset import UnetDataset
+from dataset import SemanticSegmentationDataset
 from torch.autograd import Variable
+import torch.nn as nn
+from typing import List
+from accelerate import DistributedDataParallelKwargs
+from accelerate import Accelerator
+import deepspeed
 
 # from sklearn.metrics import confusion_matrix, precision_score, recall_score
-from torchmetrics import Precision, Recall
+from torchmetrics.classification import BinaryJaccardIndex
 from torch.optim.lr_scheduler import (
     StepLR,
     CyclicLR,
-    ReduceLROnPlateau,
-    MultiStepLR,
     OneCycleLR,
 )
+from torch.cuda.amp import GradScaler, autocast
+from transformers import MaskFormerImageProcessor, SegformerImageProcessor
+from transformers.image_utils import make_list_of_images
+from transformers.models.maskformer.modeling_maskformer import (
+    MaskFormerForInstanceSegmentationOutput,
+)
+
 from typing import Optional
 from common.logger import logger
 from torch.utils.data import DataLoader, DistributedSampler
 import torch.distributed as dist
 from model_saving_obj import ModelSavingObject
 
+import config.config_hf as config
+from config.config_hf import (
+    PATH,
+    HYPERPARAM,
+    MODEL_CONFIG,
+    SCHEDULER,
+    MODEL_TYPE,
+    MODEL_NAME,
+)
 
-def inplace_relu(m):
-    classname = m.__class__.__name__
-    if classname.find("ReLU") != -1:
-        m.inplace = True
+IMAGE_PROCESSOR = {
+    "segformer": SegformerImageProcessor(),
+    "maskformer": MaskFormerImageProcessor(),
+}
 
 
 def get_lr(optimizer):
     for param_group in optimizer.param_groups:
         return param_group["lr"]
-
-
-def accuracy(pred, target):
-    if isinstance(pred, torch.Tensor):
-        pred = pred.cpu().data.numpy()
-    if isinstance(target, torch.Tensor):
-        target = target.cpu().data.numpy()
-    return (pred == target).mean()
 
 
 def collate_fn(data):
@@ -64,69 +74,261 @@ def collate_fn(data):
     return {"image": image, "patch": patch, "name": name, "label": label}
 
 
+def make_cuda_list(data: List):
+    data = [d.cuda() for d in data]
+    return data
+
+
 class Trainer(object):
     def __init__(self, net):
         self.net = net
-        self.opt = config.general["optimizer"].split("_")[0]
-        self.root_dir = config.root_dir
-        self.data_dir = config.data_dir
-        self.model_dir = config.model_dir
-        self.hyperparams = config.hyperparameters
 
-    def select_optimizer(self):
+    def _select_optimizer(self):
         optimizer = None
-        if self.opt == "Adam":
+        if HYPERPARAM["optimizer"] == "Adam":
             optimizer = optim.Adam(
                 filter(lambda p: p.requires_grad, self.net.parameters()),
-                lr=self.hyperparams[config.general["optimizer"]]["lr"],
-                weight_decay=self.hyperparams["weight_decay"],
+                lr=1e-5,
+                weight_decay=HYPERPARAM.get("weight_decay", 0),
             )
-        elif self.opt == "RMS":
-            optimizer = optim.RMSprop(
-                filter(lambda p: p.requires_grad, self.net.parameters()),
-                lr=self.hyperparams[config.general["optimizer"]]["lr"],
-                weight_decay=self.hyperparams["weight_decay"],
-            )
-        elif self.opt == "SGD":
+        elif HYPERPARAM["optimizer"] == "SGD":
             optimizer = optim.SGD(
                 filter(lambda p: p.requires_grad, self.net.parameters()),
-                lr=self.hyperparams[config.general["optimizer"]]["lr"],
-                weight_decay=self.hyperparams["weight_decay"],
-                momentum=self.hyperparams[config.general["optimizer"]]["momentum"],
+                lr=1e-5,
+                weight_decay=HYPERPARAM.get("weight_decay", 0),
+                momentum=HYPERPARAM.get("momentum", 0),
             )
-        elif self.opt == "Adagrad":
-            optimizer = optim.Adagrad(
-                filter(lambda p: p.requires_grad, self.net.parameters()),
-                lr=self.hyperparams[config.general["optimizer"]]["lr"],
-                weight_decay=self.hyperparams["weight_decay"],
-            )
-        elif self.opt == "Adadelta":
-            optimizer = optim.Adadelta(
-                filter(lambda p: p.requires_grad, self.net.parameters()),
-                lr=self.hyperparams[config.general["optimizer"]]["lr"],
-                weight_decay=self.hyperparams["weight_decay"],
-            )
-        elif self.opt == "AdamW":
+        elif HYPERPARAM["optimizer"] == "AdamW":
             optimizer = optim.AdamW(
                 filter(lambda p: p.requires_grad, self.net.parameters()),
-                lr=self.hyperparams[config.general["optimizer"]]["lr"],
-                weight_decay=self.hyperparams["weight_decay"],
+                lr=1e-5,
+                weight_decay=HYPERPARAM.get("weight_decay", 0),
             )
         return optimizer
 
-    def makefolders(self):
+    def _makefolders(self):
         """
         This function is used to create necessary folders to save models, textbooks and images
         :return:
         """
-        model_folder = self.model_dir
-        model_path = os.path.join(model_folder, config.name)
-        if not os.path.exists(model_folder):
-            os.makedirs(model_folder)
-        if not os.path.exists(model_path):
-            os.makedirs(model_path)
+        model_folder = PATH["model_dir"]
+        model_path = os.path.join(model_folder, MODEL_NAME)
+        os.makedirs(model_folder, exist_ok=True)
+        os.makedirs(model_path, exist_ok=True)
+        os.makedirs(os.path.join(model_path, "latest"), exist_ok=True)
+        os.makedirs(os.path.join(model_path, "best"), exist_ok=True)
         self.model_folder = model_folder
         self.model_path = model_path
+
+    def _select_scheduler(self):
+        if HYPERPARAM["scheduler"] == "StepLR":
+            return StepLR(
+                self.optimizer,
+                step_size=SCHEDULER["StepLR"]["step_size"] * len(self.train_loader),
+                gamma=SCHEDULER["StepLR"]["gamma"],
+            )
+        elif HYPERPARAM["scheduler"] == "CLR":
+            return CyclicLR(
+                self.optimizer,
+                base_lr=SCHEDULER["CLR"]["base_lr"],
+                max_lr=SCHEDULER["CLR"]["max_lr"],
+                step_size_up=SCHEDULER["CLR"]["step_size"] * len(self.train_loader),
+            )
+        elif HYPERPARAM["scheduler"] == "ONECLR":
+            return OneCycleLR(
+                self.optimizer,
+                max_lr=SCHEDULER["ONECLR"]["max_lr"],
+                steps_per_epoch=len(self.train_loader),
+                pct_start=SCHEDULER["ONECLR"]["pct_start"],
+                div_factor=SCHEDULER["ONECLR"]["div_factor"],
+                epochs=self.epoch,
+            )
+
+    def training(self, epoch):
+        if (
+            self.accelerator.local_process_index == 0
+            and config.mode == "run"
+            and not self.login
+        ):
+            self.login = wandb.login(key="c10829f6b79edeea79554d3c1660588729eec616")
+            config_wandb = {}
+            config_wandb.update(config.HYPERPARAM)
+            wandb.init(
+                entity="chenxilin",
+                config=config_wandb,
+                project=f"morocco_tree_{config.MODEL_TYPE}",
+                name=config.MODEL_NAME,
+            )
+        self.net, self.optimizer, self.train_loader, self.scheduler = (
+            self.accelerator.prepare(
+                self.net, self.optimizer, self.train_loader, self.scheduler
+            )
+        )
+        self.net.train()
+        # Initialize the gradient scaler
+        for _, sample in enumerate(self.train_loader, 0):
+            self.optimizer.zero_grad()
+            inputs, input_values = zip(*sample.items())
+            tensor_type = (
+                torch.cuda.FloatTensor
+                if self.accelerator.device.type == "cuda"
+                else torch.FloatTensor
+            )
+            if MODEL_TYPE == "maskformer":
+                outputs = self.net(
+                    input_values[0].type(tensor_type),
+                    input_values[2],
+                    input_values[3],
+                )
+            if MODEL_TYPE == "segformer":
+                outputs = self.net(
+                    input_values[0].type(tensor_type),
+                    input_values[1].squeeze(),
+                )
+            loss = outputs.loss
+            # ----- for debug purpose ----- #
+            # outputs = MaskFormerImageProcessor().post_process_semantic_segmentation(
+            #     outputs=outputs,
+            #     target_sizes=[
+            #         (
+            #             MODEL_CONFIG["image_size"],
+            #             MODEL_CONFIG["image_size"],
+            #         )
+            #     ]
+            #     * input_values[0].shape[0],
+            # )  # B, C, H, W
+            # outputs = SegformerImageProcessor().post_process_semantic_segmentation(
+            #     outputs=outputs, target_sizes=[(512, 512)] * image.shape[0]
+            # )
+            # IOU_metric = BinaryJaccardIndex().cuda()
+            # prediction = torch.stack(outputs, dim=0)
+            # label = input_values[-1]
+            # prediction, label = accelerator.gather_for_metrics((prediction, label))
+            # if len(label.shape) != len(prediction.shape):
+            #     label = label.squeeze()
+            #     prediction = prediction.squeeze()
+            # IOU = IOU_metric(prediction, label)
+            # IOU_reverse = IOU_metric((prediction - 1) ** 2, (label - 1) ** 2)
+            # IOU_mean = (IOU + IOU_reverse) / 2
+            # ----- for debug purpose ----- #
+            self.train_loss[epoch] += loss
+            self.accelerator.backward(loss)
+            self.optimizer.step()
+            self.scheduler.step()
+            self.train_loss[epoch] = self.train_loss[epoch] / len(self.train_loader)
+            if self.accelerator.local_process_index == 0:
+                wandb.log(
+                    {
+                        "train_loss": loss.item(),
+                    },
+                    step=self.scheduler.scheduler.last_epoch,
+                )
+        logger.info(
+            f"Epoch: {epoch} ----- Rank: {self.accelerator.local_process_index} ----- Learning_Rate: {get_lr(self.optimizer)}"
+        )
+
+    def evaluation(self, epoch):
+        self.net.eval()
+        # accelerator = Accelerator()
+        self.vali_loader = self.accelerator.prepare(self.vali_loader)
+        with torch.no_grad():
+            for _, sample in enumerate(self.vali_loader, 0):
+                inputs, input_values = zip(*sample.items())
+                tensor_type = (
+                    torch.cuda.FloatTensor
+                    if self.accelerator.device.type == "cuda"
+                    else torch.FloatTensor
+                )
+                if MODEL_TYPE == "maskformer":
+                    outputs = self.net(
+                        input_values[0].type(tensor_type),
+                        input_values[2],
+                        input_values[3],
+                    )
+                if MODEL_TYPE == "segformer":
+                    outputs = self.net(
+                        input_values[0].type(tensor_type),
+                        input_values[1].squeeze(),
+                    )
+                loss = outputs.loss
+                self.vali_loss[epoch] += loss
+                outputs = IMAGE_PROCESSOR[
+                    MODEL_TYPE
+                ].post_process_semantic_segmentation(
+                    outputs=outputs,
+                    target_sizes=[
+                        (
+                            MODEL_CONFIG["image_size"],
+                            MODEL_CONFIG["image_size"],
+                        )
+                    ]
+                    * input_values[0].shape[0],
+                )  # B, C, H, W
+                IOU_metric = BinaryJaccardIndex().cuda()
+                prediction = torch.stack(outputs, dim=0)
+                label = input_values[-1]
+                prediction, label = self.accelerator.gather_for_metrics(
+                    (prediction, label)
+                )
+                if len(label.shape) != len(prediction.shape):
+                    label = label.squeeze()
+                    prediction = prediction.squeeze()
+                IOU = IOU_metric(prediction, label)
+                # IOU_reverse = IOU_metric((prediction - 1) ** 2, (label - 1) ** 2)
+                # IOU_mean = (IOU + IOU_reverse) / 2
+                # iou_tensor_lst = [
+                #     torch.zeros(IOU.shape, dtype=IOU.dtype).to(self.gpu_id)
+                #     for _ in range(dist.get_world_size())
+                # ]
+                # dist.all_gather(iou_tensor_lst, IOU)
+                # average_IOU = sum(iou_tensor_lst) / dist.get_world_size()
+                if self.accelerator.local_process_index == 0:
+                    wandb.log(
+                        {
+                            "vali_loss": loss.item(),
+                            "iou": IOU.item(),
+                            "learning_rate": get_lr(self.optimizer),
+                        },
+                        step=self.scheduler.scheduler.last_epoch,
+                    )
+
+                model_instance = self.net
+                train_state_dict = {
+                    "optimizer": self.optimizer.state_dict(),
+                    "lr_scheduler": self.scheduler.state_dict(),
+                }
+
+                cur_saving_obj = ModelSavingObject(
+                    name=MODEL_NAME,
+                    model_instance=model_instance,
+                    train_state_dict=train_state_dict,
+                )
+                cur_loss = self.vali_loss[epoch]
+                save_best_flag = False
+                if self.best_loss is None or self.best_loss > cur_loss:
+                    self.best_loss = cur_loss
+                    save_best_flag = True
+
+                self._makefolders()
+                if save_best_flag:
+                    # self.accelerator.save(
+                    #     cur_saving_obj,
+                    #     os.path.join(
+                    #         PATH["model_dir"], MODEL_NAME, f"{MODEL_NAME}_best.pth"
+                    #     ),
+                    # )
+                    self.net.save_checkpoint(
+                        save_dir=os.path.join(PATH["model_dir"], MODEL_NAME, "best"),
+                    )
+                # self.accelerator.save(
+                #     cur_saving_obj,
+                #     os.path.join(
+                #         PATH["model_dir"], MODEL_NAME, f"{MODEL_NAME}_latest.pth"
+                #     ),
+                # )
+                self.net.save_checkpoint(
+                    save_dir=os.path.join(PATH["model_dir"], MODEL_NAME, "best"),
+                )
 
     def train_model(
         self,
@@ -138,166 +340,19 @@ class Trainer(object):
         """
         The main function to execute model training
         """
-        self.makefolders()
-        optimizer = self.select_optimizer()
-        scheduler_type = config.general["optimizer"].split("_")[1]
-        scheduler_param = self.hyperparams[config.general["optimizer"]]
-        if scheduler_type == "StepLR":
-            scheduler = StepLR(
-                optimizer,
-                step_size=scheduler_param["step_size"] * len(train_loader),
-                gamma=scheduler_param["gamma"],
-            )
-        elif scheduler_type == "CLR":
-            scheduler = CyclicLR(
-                optimizer,
-                base_lr=scheduler_param["base_lr"],
-                max_lr=scheduler_param["max_lr"],
-                step_size_up=scheduler_param["step_size"] * len(train_loader),
-            )
-        elif scheduler_type == "ONECLR":
-            scheduler = OneCycleLR(
-                optimizer,
-                max_lr=scheduler_param["max_lr"],
-                steps_per_epoch=(len(train_loader) // 1),
-                pct_start=scheduler_param["pct_start"],
-                div_factor=scheduler_param["div_factor"],
-                epochs=epoch,
-            )
 
-        train_loss = np.zeros([epoch])
-        vali_loss = np.zeros([epoch])
-        best_loss = None
+        self.epoch = epoch
+        self.train_loader = train_loader
+        self.vali_loader = vali_loader
+        self.gpu_id = gpu_id
+        self.optimizer = self._select_optimizer()
+        self.scheduler = self._select_scheduler()
+        self.train_loss = np.zeros([epoch])
+        self.vali_loss = np.zeros([epoch])
+        self.best_loss = None
+        self.login = False
+        ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
+        self.accelerator = Accelerator(kwargs_handlers=[ddp_kwargs])
         for i in range(epoch):
-            self.net.train()
-            for _, sample in enumerate(train_loader, 0):
-                optimizer.zero_grad()
-                image = Variable(sample["image"], requires_grad=False).type(
-                    torch.FloatTensor
-                )
-                label = Variable(sample["label"], requires_grad=False).type(
-                    torch.FloatTensor
-                )  # B, C, H, W
-                pos_weight = torch.tensor(
-                    train_loader.dataset.weight_list[0]
-                    / train_loader.dataset.weight_list[1]
-                ).type(torch.FloatTensor)
-                pos_weight = pos_weight.cuda() if config.cuda else pos_weight
-                criterion = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)
-                if config.cuda:
-                    image = image.cuda()
-                    label = label.cuda()
-                prediction = self.net(image)  # B, C, H, W
-                loss = criterion(prediction, label)
-                train_loss[i] += loss
-                # Initialize precision and recall metrics
-                precision_metric = Precision(
-                    task="binary",
-                    average="none",
-                ).cuda()
-                recall_metric = Recall(
-                    task="binary",
-                    average="none",
-                ).cuda()
-                precision = precision_metric(prediction, label)
-                recall = recall_metric(prediction, label)
-                loss.backward()
-                optimizer.step()
-                if self.hyperparams[config.general["optimizer"]] != "none":
-                    scheduler.step()
-            train_loss[i] = train_loss[i] / len(train_loader)
-            if dist.get_rank() == 0:
-                wandb.log(
-                    {
-                        "train_loss": loss.item(),
-                    },
-                    step=scheduler.last_epoch,
-                )
-
-            self.net.eval()
-            with torch.no_grad():
-                for _, sample in enumerate(vali_loader, 0):
-                    image = Variable(sample["image"], requires_grad=False).type(
-                        torch.FloatTensor
-                    )
-                    label = Variable(sample["label"], requires_grad=False).type(
-                        torch.FloatTensor
-                    )
-                    criterion = torch.nn.BCEWithLogitsLoss()
-                    if config.cuda:
-                        image = image.cuda()
-                        label = label.cuda()
-                    prediction = self.net(image)
-                    loss = criterion(prediction, label)
-                    vali_loss[i] += loss
-                    # Initialize precision and recall metrics
-                    precision_metric = Precision(
-                        task="binary",
-                        average="none",
-                    ).cuda()
-                    recall_metric = Recall(
-                        task="binary",
-                        average="none",
-                    ).cuda()
-                    precision = precision_metric(prediction, label)
-                    recall = recall_metric(prediction, label)
-                    precision_tensor_list = [
-                        torch.zeros(precision.shape, dtype=precision.dtype).to(gpu_id)
-                        for _ in range(dist.get_world_size())
-                    ]
-                    recall_tensor_list = [
-                        torch.zeros(recall.shape, dtype=recall.dtype).to(gpu_id)
-                        for _ in range(dist.get_world_size())
-                    ]
-                    dist.all_gather(precision_tensor_list, precision)
-                    dist.all_gather(recall_tensor_list, recall)
-                    average_precision = (
-                        sum(precision_tensor_list) / dist.get_world_size()
-                    )
-                    average_recall = sum(recall_tensor_list) / dist.get_world_size()
-                    if dist.get_rank() == 0:
-                        logger.info(get_lr(optimizer))
-                        wandb.log(
-                            {
-                                "vali_loss": loss.item(),
-                                "olive_recall": average_recall.item(),
-                                "olive_precision": average_precision.item(),
-                                "olive_F1": 2
-                                * average_recall.item()
-                                * average_precision.item()
-                                / (average_recall.item() + average_precision.item()),
-                                "learning_rate": get_lr(optimizer),
-                            },
-                            step=scheduler.last_epoch,
-                        )
-
-                    model_instance = self.net.module
-                    train_state_dict = {
-                        "optimizer": optimizer.state_dict(),
-                        "lr_scheduler": scheduler.state_dict(),
-                    }
-
-                    cur_saving_obj = ModelSavingObject(
-                        name=config.name,
-                        model_instance=model_instance,
-                        train_state_dict=train_state_dict,
-                    )
-                    cur_loss = vali_loss[i]
-                    save_best_flag = False
-                    if best_loss is None or best_loss > cur_loss:
-                        best_loss = cur_loss
-                        save_best_flag = True
-
-                    if save_best_flag:
-                        torch.save(
-                            cur_saving_obj,
-                            os.path.join(
-                                self.model_dir, config.name, f"{config.name}_best.pth"
-                            ),
-                        )
-                    torch.save(
-                        cur_saving_obj,
-                        os.path.join(
-                            self.model_dir, config.name, f"{config.name}_latest.pth"
-                        ),
-                    )
+            self.training(epoch=i)
+            self.evaluation(epoch=i)
