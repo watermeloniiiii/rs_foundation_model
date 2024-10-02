@@ -88,7 +88,7 @@ if TASK == "segmentation":
             model_type=MODEL_TYPE,
             model_version=MODEL_VERSION,
             pretrained_path=None,
-            num_classes=11,
+            num_classes=2,
             image_size=512,
         )
 if TASK == "classification":

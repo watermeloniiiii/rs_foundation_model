@@ -103,6 +103,7 @@ class SemanticSegmentationDataset(Dataset):
         include_meta: bool = False,
         image_processor: BaseImageProcessor = None,
         label_processor: BaseImageProcessor = None,
+        class_of_interest=None,
     ) -> None:
         """the iterarable dataset used for training
 
@@ -127,6 +128,7 @@ class SemanticSegmentationDataset(Dataset):
         self.include_meta = include_meta
         self.image_processor = image_processor
         self.label_processor = label_processor
+        self.class_of_interest = class_of_interest
 
         # if no customized weight is provided, will calculate the weights among different classes
         if not config.customized_weight:
@@ -242,12 +244,17 @@ class SemanticSegmentationDataset(Dataset):
         doy += day
         return doy
 
-    def __getitem__(self, index, class_of_interest=None):
+    def __getitem__(self, index):
         tiles, target = self.filepath_lst[index]
         date = self._str_2_doy(tiles[0].split("/")[-2][-4:])
         tgt = np.array(Image.open(target))[..., None]
-        if class_of_interest:
-            coi_idx = LANDCOVER_REVERSED
+        if self.class_of_interest:
+            coi_idx = [LANDCOVER_REVERSED[coi] for coi in self.class_of_interest]
+            coi_idx = np.array(coi_idx)
+            # Create a mask where tgt is in the coi_idx array
+            mask = np.isin(tgt, coi_idx)
+            # Set values in tgt to 0 where mask is False
+            tgt[~mask] = 0
         image = self._composite(tiles)
         image_id = tiles[0].split("/")[8] + "_" + tiles[0].split("/")[9]
         if self.image_processor:
@@ -394,4 +401,5 @@ if __name__ == "__main__":
     dataset = SemanticSegmentationDataset(
         root="/NAS6/Members/linchenxi/projects/RS_foundation_model/satlas",
         split=SemanticSegmentationDataset.Split["TRAIN"],
+        class_of_interest=["water"],
     )

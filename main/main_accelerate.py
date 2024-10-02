@@ -192,7 +192,9 @@ def execute():
         split=SemanticSegmentationDataset.Split["TRAIN"],
         image_processor=image_processor,
         label_processor=label_processor,
+        class_of_interest=["water"],
     )
+
     collate_fn = DATASET.collate_fn if hasattr(DATASET, "collate_fn") else None
     train_loader = DataLoader(
         train_data,
@@ -206,6 +208,7 @@ def execute():
         split=SemanticSegmentationDataset.Split["TEST"],
         image_processor=image_processor,
         label_processor=label_processor,
+        class_of_interest=["water"],
     )
     vali_loader = DataLoader(
         vali_data,
