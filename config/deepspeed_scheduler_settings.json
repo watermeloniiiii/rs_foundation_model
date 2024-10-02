@@ -1,0 +1,11 @@
+{
+    "scheduler": {
+        "type": "WarmupCosineLR",
+        "params": {
+            "warmup_num_steps": 100,
+            "total_num_steps": 2000,
+            "warmup_min_ratio": 0,
+            "last_batch_iteration": -1
+        }
+    }
+}

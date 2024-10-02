@@ -1,0 +1,1 @@
+accelerate launch --config_file "/NAS6/Members/linchenxi/morocco/config/accelerate_deepspeed_config.yaml" main/main_accelerate.py
