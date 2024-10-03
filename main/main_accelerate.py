@@ -33,6 +33,9 @@ from config.config_hf import (
     MODEL_TYPE,
     MODEL_NAME,
 )
+from omegaconf import OmegaConf
+
+cfg = OmegaConf.load("./config/model_config.yaml")
 
 DATASET_DICT = {
     # "maskformer": MaskFormerDataset,
@@ -147,7 +150,10 @@ def model_initialization():
                 do_normalize=False,
                 size=config.MODEL_CONFIG["image_size"],
             )
-            model = Dinov2ForSemanticSegmentation()
+            model = Dinov2ForSemanticSegmentation(
+                cfg_dino=cfg.DINO.cfg_dino,
+                weight_dino=cfg.DINO.weight_dino,
+            )
 
     if config.TASK == "classification":
         if config.MODEL_TYPE == "vit":

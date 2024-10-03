@@ -5,7 +5,9 @@ from config.pretrained_model_path import (
     VISIONTRANSFORMER,
 )
 from config.utils import find_last_index
+from omegaconf import OmegaConf
 
+cfg = OmegaConf.load("./config/model_config.yaml")
 WEIGHT = [
     0.07174091612736269,
     0.33986588177825566,
@@ -26,11 +28,7 @@ SCHEDULER = {
     "ONECLR": dict(max_lr=1e-3, pct_start=0.2, div_factor=10),
 }
 
-PATH = {
-    "data_dir": "/NAS6/Members/linchenxi/projects/RS_foundation_model/satlas",
-    "output_dir": "/NAS6/Members/linchenxi/projects/RS_foundation_model/model",
-    "model_dir": "/NAS6/Members/linchenxi/projects/RS_foundation_model/model",
-}
+PATH = cfg.PATH
 
 STATS_MEAN = [
     mean * 255
@@ -42,9 +40,8 @@ STATS_STD = [
 ]
 
 mode = "run"
-class_of_interest = ["water", "developed", ["tree", "shrub", "grass"], "crop"]
+class_of_interest = cfg.MODEL.class_of_interest
 customized_weight = True
-encoder_weights = True
 cuda = True
 TASK = "segmentation"
 MODEL_TYPE = "dinov2"
