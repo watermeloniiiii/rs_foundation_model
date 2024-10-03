@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import os
-import trainer_deepspeed
+import train.trainer_deepspeed as trainer_deepspeed
 from torch.utils.data import DataLoader, DistributedSampler, SubsetRandomSampler
 from transformers import (
     SegformerForSemanticSegmentation,
@@ -20,11 +20,11 @@ import torch
 from common.logger import logger
 
 import config.config_hf as config
-from dataset import (
+from data.dataset import (
     SemanticSegmentationDataset,
     ClassificationDataset,
 )
-from customized_segmention_model import Dinov2ForSemanticSegmentation
+from models.customized_segmention_model import Dinov2ForSemanticSegmentation
 from config.config_hf import (
     PATH,
     HYPERPARAM,
@@ -192,7 +192,7 @@ def execute():
         split=SemanticSegmentationDataset.Split["TRAIN"],
         image_processor=image_processor,
         label_processor=label_processor,
-        class_of_interest=["water"],
+        class_of_interest=config.class_of_interest,
     )
 
     collate_fn = DATASET.collate_fn if hasattr(DATASET, "collate_fn") else None
@@ -208,7 +208,7 @@ def execute():
         split=SemanticSegmentationDataset.Split["TEST"],
         image_processor=image_processor,
         label_processor=label_processor,
-        class_of_interest=["water"],
+        class_of_interest=config.class_of_interest,
     )
     vali_loader = DataLoader(
         vali_data,

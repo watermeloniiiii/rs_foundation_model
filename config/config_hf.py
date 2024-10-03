@@ -1,5 +1,10 @@
-from pretrained_model_path import SEGFORMER, MASKFORMER, MASK2FORMER, VISIONTRANSFORMER
-from utils import find_last_index
+from config.pretrained_model_path import (
+    SEGFORMER,
+    MASKFORMER,
+    MASK2FORMER,
+    VISIONTRANSFORMER,
+)
+from config.utils import find_last_index
 
 WEIGHT = [
     0.07174091612736269,
@@ -37,6 +42,7 @@ STATS_STD = [
 ]
 
 mode = "run"
+class_of_interest = ["water", "developed", ["tree", "shrub", "grass"], "crop"]
 customized_weight = True
 encoder_weights = True
 cuda = True
@@ -88,7 +94,7 @@ if TASK == "segmentation":
             model_type=MODEL_TYPE,
             model_version=MODEL_VERSION,
             pretrained_path=None,
-            num_classes=1,
+            num_classes=len(class_of_interest),
             image_size=512,
         )
 if TASK == "classification":

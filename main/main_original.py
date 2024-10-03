@@ -20,9 +20,9 @@ from transformers import (
 )
 import config.config_hf as config
 from config.config_hf import STATS_MEAN, STATS_STD
-from ddp_utils import init_default_settings, ddp_setup
-import trainer_unet
-from dataset import SemanticSegmentationDataset, MaskFormerDataset
+from distributed.ddp_utils import init_default_settings, ddp_setup
+import train.trainer_unet as trainer_unet
+from data.dataset import SemanticSegmentationDataset, MaskFormerDataset
 
 from common.logger import logger
 

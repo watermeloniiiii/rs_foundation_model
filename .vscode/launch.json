@@ -26,6 +26,9 @@
             "justMyCode": false,
             "console": "integratedTerminal",
             "module": "accelerate.commands.launch",
+            "env": {
+                "CUDA_LAUNCH_BLOCKING": "1"
+            },
             "args": [
                 "--config_file",
                 "/NAS6/Members/linchenxi/morocco/config/accelerate_deepspeed_config.yaml",

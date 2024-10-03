@@ -18,7 +18,7 @@ from typing import Optional, Tuple, List
 from common.geoimage.raster_dataset import RasterDataset, mosaic_raster_datasets
 from common.geoimage.scene_meta import ValueInterpretationMeta
 from common.logger import logger
-from dataset import (
+from data.dataset import (
     ClassificationDataset,
     SemanticSegmentationDataset,
 )
@@ -30,7 +30,7 @@ from transformers import (
     SegformerForSemanticSegmentation,
     ViTForImageClassification,
 )
-from customized_segmention_model import Dinov2ForSemanticSegmentation
+from models.customized_segmention_model import Dinov2ForSemanticSegmentation
 import config.config_hf as config
 from config.config_hf import (
     PATH,
@@ -38,7 +38,7 @@ from config.config_hf import (
     STATS_MEAN,
     STATS_STD,
 )
-import pretrained_model_path as MODEL_PATH
+import config.pretrained_model_path as MODEL_PATH
 
 DATASET_DICT = {
     "vit": ClassificationDataset,
@@ -48,7 +48,7 @@ IMAGE_PROCESSOR = {
     "maskformer": MaskFormerImageProcessor,
     "vit": ViTImageProcessor,
     "unet": SegformerImageProcessor,
-    "dinov2": SegformerImageProcessor
+    "dinov2": SegformerImageProcessor,
 }
 
 IMAGE_SZIE = {
@@ -57,7 +57,7 @@ IMAGE_SZIE = {
     "mask2former": 512,
     "unet": 224,
     "vit": 224,
-    "dinov2": 512
+    "dinov2": 512,
 }
 
 
@@ -184,16 +184,15 @@ class Inference:
                     pred = (
                         (torch.nn.functional.sigmoid(outputs) > 0.5)
                         .to(torch.long)
-                        .cpu().numpy()
+                        .cpu()
+                        .numpy()
                     )
                 label = input_values[inputs.index("label")]
                 image_id = sample["image_id"]
                 for img, img_id in zip(pred, image_id):
-                    Image.fromarray(img.cpu().numpy().astype(np.int16)).save(os.path.join(self.save_folder, img_id + ".png"))
-
-
-
-                 
+                    Image.fromarray(img.cpu().numpy().astype(np.int16)).save(
+                        os.path.join(self.save_folder, img_id + ".png")
+                    )
 
         tp_neg, fp_neg, fn_neg, tn_neg = tn_all, fn_all, fp_all, tp_all
         metric = self.get_metrics(
@@ -358,7 +357,7 @@ class Inference:
             do_rescale=False,
             do_normalize=False,
             size=config.MODEL_CONFIG["image_size"],
-            )
+        )
         DATASET = DATASET_DICT.get(self.id.split("_")[0], SemanticSegmentationDataset)
         cur_dataset = DATASET(
             root=config.PATH["data_dir"],
@@ -418,11 +417,7 @@ class Inference:
         if os.path.exists(csv_outdir):
             os.remove(csv_outdir)
         pred_outdir, prob_outdir = self.makedirs()
-        if (
-            os.path.exists(pred_outdir)
-            and os.path.exists(prob_outdir)
-            and skip_exists
-        ):
+        if os.path.exists(pred_outdir) and os.path.exists(prob_outdir) and skip_exists:
             logger.info(f"the inference result already existed. Will skip")
         self.data_type = "train" if evaluate else "test"
         cur_dataset = self.retrieve_dataset()
@@ -433,6 +428,7 @@ class Inference:
                 return_lst=return_lst,
             )
 
+
 if __name__ == "__main__":
     from deepspeed.utils.zero_to_fp32 import get_fp32_state_dict_from_zero_checkpoint
 
@@ -440,12 +436,12 @@ if __name__ == "__main__":
         task = "segmentation"
         model = "dinov2_linear"
         name = f"{model}_{idx}"
-        save_folder = f"/NAS6/Members/linchenxi/projects/RS_foundation_model/inference/{name}"
+        save_folder = (
+            f"/NAS6/Members/linchenxi/projects/RS_foundation_model/inference/{name}"
+        )
         os.makedirs(os.path.join(save_folder, "result"), exist_ok=True)
         os.makedirs(os.path.join(save_folder, "accuracy"), exist_ok=True)
-        model_path = (
-            f"/NAS6/Members/linchenxi/projects/RS_foundation_model/model/{name}/best"  # noqa:E501
-        )
+        model_path = f"/NAS6/Members/linchenxi/projects/RS_foundation_model/model/{name}/best"  # noqa:E501
         m = Dinov2ForSemanticSegmentation()
         state_dict = get_fp32_state_dict_from_zero_checkpoint(model_path, tag="")
         m.load_state_dict(state_dict)
