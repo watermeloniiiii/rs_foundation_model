@@ -9,3 +9,4 @@ venv/
 fmow_sentinel/
 attention_maps/
 logs/
+slurm*

@@ -45,8 +45,8 @@ customized_weight = True
 cuda = True
 TASK = "segmentation"
 MODEL_TYPE = "dinov2"
-MODEL_VERSION = "linear"
-idx = find_last_index(f"{MODEL_TYPE}_{MODEL_VERSION}", PATH["output_dir"])
+MODEL_VERSION = "baseline"
+idx = find_last_index(f"{MODEL_TYPE}_{MODEL_VERSION}", PATH["model_outdir"])
 MODEL_NAME = f"{MODEL_TYPE}_{MODEL_VERSION}_{idx}"
 if TASK == "segmentation":
     if MODEL_TYPE == "segformer":
@@ -91,7 +91,7 @@ if TASK == "segmentation":
             model_type=MODEL_TYPE,
             model_version=MODEL_VERSION,
             pretrained_path=None,
-            num_classes=len(class_of_interest),
+            num_classes=len(class_of_interest) + 1,
             image_size=512,
         )
 if TASK == "classification":
@@ -105,10 +105,10 @@ if TASK == "classification":
             image_size=224,
         )
 HYPERPARAM = dict(
-    batch_size=8,
-    epochs=500,
+    batch_size=cfg.MODEL.batch_size,
+    epochs=cfg.MODEL.num_epoch,
     weight=WEIGHT,
-    optimizer="AdamW",
+    optimizer=cfg.MODEL.optimizer,
     scheduler=None,
     weight_decay=0,
     model_config=MODEL_CONFIG,

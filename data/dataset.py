@@ -254,7 +254,7 @@ class SemanticSegmentationDataset(Dataset):
             for cois in self.class_of_interest:
                 coi_idx = (
                     [LANDCOVER_REVERSED[coi] for coi in cois]
-                    if isinstance(cois, list)
+                    if not isinstance(cois, str)
                     else LANDCOVER_REVERSED[cois]
                 )
                 coi_idx = np.array(coi_idx)

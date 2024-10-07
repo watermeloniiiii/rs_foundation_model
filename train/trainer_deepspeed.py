@@ -67,6 +67,9 @@ from config.config_hf import (
     MODEL_TYPE,
     MODEL_NAME,
 )
+from omegaconf import OmegaConf
+
+cfg = OmegaConf.load("./config/model_config.yaml")
 
 IMAGE_PROCESSOR = {
     "segformer": SegformerImageProcessor(),
@@ -129,20 +132,20 @@ class Trainer(object):
             if HYPERPARAM["optimizer"] == "Adam":
                 optimizer = optim.Adam(
                     filter(lambda p: p.requires_grad, self.net.parameters()),
-                    lr=1e-5,
+                    lr=cfg.MODEL.base_lr,
                     weight_decay=HYPERPARAM.get("weight_decay", 0),
                 )
             elif HYPERPARAM["optimizer"] == "SGD":
                 optimizer = optim.SGD(
                     filter(lambda p: p.requires_grad, self.net.parameters()),
-                    lr=1e-4,
+                    lr=cfg.MODEL.base_lr,
                     weight_decay=HYPERPARAM.get("weight_decay", 0),
                     momentum=HYPERPARAM.get("momentum", 0),
                 )
             elif HYPERPARAM["optimizer"] == "AdamW":
                 optimizer = optim.AdamW(
                     filter(lambda p: p.requires_grad, self.net.parameters()),
-                    lr=5e-3,
+                    lr=cfg.MODEL.base_lr,
                     weight_decay=HYPERPARAM.get("weight_decay", 0),
                 )
         # otherwise if there's no user-defined optimizer but a deepspeed optimizer
@@ -159,7 +162,7 @@ class Trainer(object):
         This function is used to create necessary folders to save models, textbooks and images
         :return:
         """
-        model_folder = PATH["model_dir"]
+        model_folder = PATH["model_outdir"]
         model_path = os.path.join(model_folder, MODEL_NAME)
         os.makedirs(model_folder, exist_ok=True)
         os.makedirs(model_path, exist_ok=True)
@@ -215,13 +218,21 @@ class Trainer(object):
             deepspeed_config = self.accelerator.state.deepspeed_plugin.deepspeed_config
             if "warmup_num_steps" in deepspeed_config["scheduler"]["params"]:
                 deepspeed_config["scheduler"]["params"]["warmup_num_steps"] = (
-                    math.ceil(len(self.train_loader) * self.epoch * 0.01)
+                    math.ceil(
+                        len(self.train_loader)
+                        * self.epoch
+                        * cfg.MODEL.warmup_steps_ratio
+                    )
                     // self.accelerator.gradient_accumulation_steps
                     // self.num_processes
                 )
             if "total_num_steps" in deepspeed_config["scheduler"]["params"]:
                 deepspeed_config["scheduler"]["params"]["total_num_steps"] = (
-                    math.ceil(len(self.train_loader) * self.epoch * 0.2)
+                    math.ceil(
+                        len(self.train_loader)
+                        * self.epoch
+                        * cfg.MODEL.total_steps_ratio
+                    )
                     // self.accelerator.gradient_accumulation_steps
                     // self.num_processes
                 )
@@ -369,11 +380,14 @@ class Trainer(object):
                 Rec = Recall_metric(prediction, labels.type(torch.cuda.LongTensor))
                 F1 = F1_metric(prediction, labels.type(torch.cuda.LongTensor))
                 gathered_metrics = self.accelerator.gather_for_metrics(
-                    (IOU, Prec, Rec, F1, loss)
+                    (IOU, Prec, Rec, F1)
                 )
-                self.vali_loss[epoch] += torch.mean(gathered_metrics[-1])
                 for m_idx, m in enumerate(["IOU", "Precision", "Recall", "F1"]):
                     self.metric[m][epoch] += torch.mean(gathered_metrics[m_idx])
+
+            gathered_loss = self.accelerator.gather_for_metrics(loss)
+            self.vali_loss[epoch] += torch.mean(gathered_loss)
+            cur_loss = self.vali_loss[epoch]
 
             if self.accelerator.is_local_main_process:
                 self.accelerator.log(
@@ -389,8 +403,6 @@ class Trainer(object):
                     },
                     step=self.cur_step,
                 )
-
-            cur_loss = self.vali_loss[epoch]
             save_best_flag = False
             if self.best_loss is None or self.best_loss > cur_loss:
                 self.best_loss = cur_loss
@@ -399,7 +411,7 @@ class Trainer(object):
             self._makefolders()
             if save_best_flag:
                 self.net.save_checkpoint(
-                    save_dir=os.path.join(PATH["model_dir"], MODEL_NAME), tag="best"
+                    save_dir=os.path.join(PATH["model_outdir"], MODEL_NAME), tag="best"
                 )
 
     def train_model(

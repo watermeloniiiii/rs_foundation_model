@@ -2,17 +2,16 @@ from models.dinov2_model import DINOV2PretrainedModel
 import torch
 import torch.nn as nn
 from transformers.modeling_outputs import SemanticSegmenterOutput
-from data.dataset import LANDCOVER
 
 
 class LinearClassifier(torch.nn.Module):
-    def __init__(self, in_channels, tokenW=32, tokenH=32, num_labels=1):
+    def __init__(self, in_channels, tokenW=32, tokenH=32, num_class=1):
         super(LinearClassifier, self).__init__()
 
         self.in_channels = in_channels
         self.width = tokenW
         self.height = tokenH
-        self.classifier = torch.nn.Conv2d(in_channels, num_labels, (1, 1))
+        self.classifier = torch.nn.Conv2d(in_channels, num_class, (1, 1))
 
     def forward(self, embeddings):
         embeddings = embeddings.reshape(-1, self.height, self.width, self.in_channels)
@@ -22,10 +21,10 @@ class LinearClassifier(torch.nn.Module):
 
 
 class Dinov2ForSemanticSegmentation(nn.Module):
-    def __init__(self, cfg_dino, weights_dino, img_size=512, patch_size=16):
+    def __init__(self, cfg, img_size=512, patch_size=16, num_class=1):
         super().__init__()
 
-        self.dinov2 = DINOV2PretrainedModel(cfg_dino, weights_dino)
+        self.dinov2 = DINOV2PretrainedModel(cfg)
         self.config = self.dinov2.config
         self.hidden_size = self.dinov2.model.patch_embed.proj.out_channels
         self.patch_size = self.dinov2.config.student.patch_size
@@ -33,7 +32,7 @@ class Dinov2ForSemanticSegmentation(nn.Module):
         self.height = self.width = img_size // patch_size
         self.feature_fusion = nn.Linear(self.hidden_size * 4, self.hidden_size)
         self.classifier = LinearClassifier(
-            self.hidden_size, self.width, self.height, len(LANDCOVER)
+            self.hidden_size, self.width, self.height, num_class=num_class
         )
 
     def forward(self, pixel_values, labels=None, doy=None):

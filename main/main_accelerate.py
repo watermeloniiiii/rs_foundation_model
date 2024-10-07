@@ -151,8 +151,8 @@ def model_initialization():
                 size=config.MODEL_CONFIG["image_size"],
             )
             model = Dinov2ForSemanticSegmentation(
-                cfg_dino=cfg.DINO.cfg_dino,
-                weight_dino=cfg.DINO.weight_dino,
+                "./config/model_config.yaml",
+                num_class=len(cfg.MODEL.class_of_interest) + 1,
             )
 
     if config.TASK == "classification":
@@ -190,7 +190,7 @@ def execute():
         kwargs_handlers=[ddp_kwargs],
         log_with="wandb",
         gradient_accumulation_steps=1,
-        project_dir=os.path.join(config.PATH["output_dir"], MODEL_NAME),
+        project_dir=os.path.join(config.PATH["model_outdir"], MODEL_NAME),
     )
 
     train_data = DATASET(
@@ -207,7 +207,9 @@ def execute():
         batch_size=config.HYPERPARAM["batch_size"],
         collate_fn=collate_fn,
         drop_last=True,
-        sampler=SubsetRandomSampler(torch.randint(0, len(train_data), (1000,))),
+        sampler=SubsetRandomSampler(
+            torch.randint(0, len(train_data), (cfg.MODEL.num_train_samples,))
+        ),
     )
     vali_data = DATASET(
         root=data_root,
@@ -221,7 +223,9 @@ def execute():
         batch_size=config.HYPERPARAM["batch_size"],
         collate_fn=collate_fn,
         drop_last=True,
-        sampler=SubsetRandomSampler(torch.randint(0, len(vali_data), (1000,))),
+        sampler=SubsetRandomSampler(
+            torch.randint(0, len(vali_data), (cfg.MODEL.num_vali_samples,))
+        ),
     )
     logger.info(f"{len(vali_loader)}")
     trainer = trainer_deepspeed.Trainer(net=model)
