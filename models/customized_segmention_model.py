@@ -26,6 +26,7 @@ class Dinov2ForSemanticSegmentation(nn.Module):
 
         self.dinov2 = DINOV2PretrainedModel(cfg)
         self.config = self.dinov2.config
+        self.num_class = num_class
         self.hidden_size = self.dinov2.model.patch_embed.proj.out_channels
         self.patch_size = self.dinov2.config.student.patch_size
         self.num_register = self.dinov2.config.student.num_register_tokens
@@ -57,6 +58,8 @@ class Dinov2ForSemanticSegmentation(nn.Module):
             loss_fct = torch.nn.CrossEntropyLoss(ignore_index=0)
             if labels.dtype != torch.cuda.LongTensor:
                 labels = labels.type(torch.cuda.LongTensor)
-            loss = loss_fct(logits.squeeze(), labels.squeeze())
+            # labels = labels[:, None, :, :] if len(labels.shape) == 3 else labels
+            logits = logits.squeeze() if self.num_class != 1 else logits
+            loss = loss_fct(logits, labels)
 
         return SemanticSegmenterOutput(loss=loss, logits=logits)

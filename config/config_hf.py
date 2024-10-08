@@ -39,13 +39,35 @@ STATS_STD = [
     for std in [0.064, 0.072, 0.0095, 0.048, 0.067, 0.080, 0.085, 0.074, 0.060]
 ]
 
+STATS_MEAN_Sen1Flood = [
+    1189.2240032217355,
+    1335.7876259041898,
+    1369.555378215939,
+    1432.4846319273197,
+    2329.1874191028446,
+    2776.599471278697,
+    2559.5920587145415,
+    1986.2344462964788,
+    1150.1873175658327,
+]
+STATS_STD_Sen1Flood = [
+    504.48473658532214,
+    409.57012279339966,
+    395.4498976071994,
+    459.6583462832101,
+    640.6401557563074,
+    771.8186296160205,
+    743.4712046089181,
+    695.772232693198,
+    522.1633726674359,
+]
 mode = "run"
 class_of_interest = cfg.MODEL.class_of_interest
 customized_weight = True
 cuda = True
 TASK = "segmentation"
 MODEL_TYPE = "dinov2"
-MODEL_VERSION = "baseline"
+MODEL_VERSION = "flood"
 idx = find_last_index(f"{MODEL_TYPE}_{MODEL_VERSION}", PATH["model_outdir"])
 MODEL_NAME = f"{MODEL_TYPE}_{MODEL_VERSION}_{idx}"
 if TASK == "segmentation":

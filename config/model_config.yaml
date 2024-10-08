@@ -1,5 +1,5 @@
 PATH:
-  data_dir: "/NAS6/Members/linchenxi/projects/RS_foundation_model/satlas"
+  data_dir: "/NAS6/Members/linchenxi/projects/RS_foundation_model/flood_prediction"
   log_outdir: "/NAS6/Members/linchenxi/projects/RS_foundation_model/logs"
   model_outdir: "/NAS6/Members/linchenxi/projects/RS_foundation_model/model"
 MODEL:
@@ -11,18 +11,22 @@ MODEL:
       - shrub
       - grass
     - crop
+  fine_tune_class:
+    - water
   customized_weight: true
   img_size: 512
   batch_size: 8
   num_epoch: 500
   optimizer: "AdamW"
-  base_lr: 1e-3
+  base_lr: 1e-5
   total_steps_ratio: 0.2
   warmup_steps_ratio: 0.01
   num_train_samples: 1000
   num_vali_samples: 1000
-
 DINO:
   cfg_dino: "/NAS6/Members/linchenxi/projects/DINOV2/model3/config.yaml"
   weights_dino: "/NAS6/Members/linchenxi/projects/DINOV2/model3/eval/training_12499/teacher_checkpoint.pth"
+  # weights_dino: []
+FINETUNE:
+  weights_finetune: "/NAS6/Members/linchenxi/projects/RS_foundation_model/model/dinov2_linear_2/best"
 
