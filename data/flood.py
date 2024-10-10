@@ -14,11 +14,13 @@ import shutil
 from common.geoimage.raster_dataset import RasterDataset
 from common.img_utils.img_geom import rotate, flip
 from common.logger import logger
-from config import config_hf as config
 
-# from config.config_hf import STATS_MEAN, STATS_STD
+from config.setup import default_setup
+
+config = default_setup("./config/model_config.yaml")
 
 BAND_ORDER = [3, 2, 1, 4, 5, 6, 7, 10, 11]
+LANDCOVER = {0: "Background", 1: "Water"}
 BAND_NAME = {
     3: "red",
     2: "green",
@@ -142,7 +144,7 @@ class Sen1FloodsDataset(Dataset):
         self.image_processor = image_processor
         self.label_processor = label_processor
         # if no customized weight is provided, will calculate the weights among different classes
-        if not config.customized_weight:
+        if not config.MODEL_INFO.class_weight:
             self.sample_cnt = self._build_crop_cnt_list()
             self.weight_list = [
                 i / sum(list(self.sample_cnt.values()))
@@ -153,8 +155,8 @@ class Sen1FloodsDataset(Dataset):
             )
         else:
             self.weight_list = [
-                i / sum(config.HYPERPARAM["weight"])
-                for i in config.HYPERPARAM["weight"]
+                i / sum(config.MODEL_INFO.class_weight)
+                for i in config.MODEL_INFO.class_weight
             ]
         if STATS_MEAN and STATS_STD:
             self.mean = STATS_MEAN
@@ -204,10 +206,12 @@ class Sen1FloodsDataset(Dataset):
         overall_std = [np.mean(stats[band]["std"]) for band in BAND_NAME.values()]
         return (overall_mean, overall_std)
 
-    # def _get_sample_count(self, filepath, sample_count):
-    #     file = np.array(Image.open(filepath[1]))
-    #     for c_val, c in LANDCOVER.items():
-    #         sample_count[c] += (file == c_val).sum()
+    def _get_sample_count(self, filepath, sample_count):
+        file = RasterDataset.from_file(
+            filepath.replace("img", "label").replace("S2Hand", "LabelHand")
+        ).data
+        for c_val, c in LANDCOVER.items():
+            sample_count[c] += (file == c_val).sum()
 
     def _build_crop_cnt_list(self):
         sample_count = defaultdict(int)

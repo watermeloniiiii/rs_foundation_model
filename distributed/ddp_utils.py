@@ -6,7 +6,7 @@ import torch.nn as nn
 import torch.distributed as dist
 from common.logger import logger
 
-import config.config_hf as config
+import config.setup as config
 
 
 def init_default_settings():

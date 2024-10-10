@@ -3,192 +3,65 @@
 
 import os
 import train.trainer_deepspeed as trainer_deepspeed
-from torch.utils.data import DataLoader, DistributedSampler, SubsetRandomSampler
+from torch.utils.data import DataLoader
 from transformers import (
-    SegformerForSemanticSegmentation,
     SegformerImageProcessor,
-    MaskFormerForInstanceSegmentation,
-    MaskFormerImageProcessor,
-    Mask2FormerForUniversalSegmentation,
-    Mask2FormerImageProcessor,
 )
 from accelerate import DistributedDataParallelKwargs
 from accelerate import Accelerator
-import segmentation_models_pytorch as smp
-import torch
-
 from common.logger import logger
 from deepspeed.utils.zero_to_fp32 import get_fp32_state_dict_from_zero_checkpoint
-import config.config_hf as config
+import config.setup as config
 from data.flood import Sen1FloodsDataset
 from models.customized_segmention_model import (
     Dinov2ForSemanticSegmentation,
     LinearClassifier,
 )
-from config.config_hf import (
-    MODEL_NAME,
-)
-from omegaconf import OmegaConf
-
-cfg = OmegaConf.load("./config/model_config.yaml")
-
-DATASET_DICT = {
-    # "maskformer": MaskFormerDataset,
-    # "mask2former": MaskFormerDataset,
-    # "vit": ClassificationDataset,
-}
+from config.setup import default_setup
 
 from transformers import (
-    SegformerForSemanticSegmentation,
     SegformerImageProcessor,
-    MaskFormerForInstanceSegmentation,
-    MaskFormerImageProcessor,
-    Mask2FormerForUniversalSegmentation,
-    Mask2FormerImageProcessor,
-    ViTForImageClassification,
-    ViTImageProcessor,
 )
-import config.config_hf as config
-from config.config_hf import STATS_MEAN_Sen1Flood as STATS_MEAN
-from config.config_hf import STATS_STD_Sen1Flood as STATS_STD
 
 
-def model_initialization():
-    if config.TASK == "segmentation":
-        if config.MODEL_TYPE == "segformer":
-            image_processor = SegformerImageProcessor(
-                do_resize=False,
-                image_mean=STATS_MEAN,
-                image_std=STATS_STD,
-                do_rescale=False,
-                size=config.MODEL_CONFIG["image_size"],
-            )
-            label_processor = SegformerImageProcessor(
-                do_resize=True,
-                do_rescale=False,
-                do_normalize=False,
-                size=config.MODEL_CONFIG["image_size"],
-            )
-            model = SegformerForSemanticSegmentation.from_pretrained(
-                config.MODEL_CONFIG["pretrained_path"],
-                num_labels=1,
-                ignore_mismatched_sizes=True,
-            )
-        if config.MODEL_TYPE == "maskformer":
-            image_processor = MaskFormerImageProcessor(
-                do_resize=True,
-                image_mean=STATS_MEAN,
-                image_std=STATS_STD,
-                do_rescale=False,
-                size=config.MODEL_CONFIG["image_size"],
-            )
-            label_processor = MaskFormerImageProcessor(
-                do_resize=True,
-                do_rescale=False,
-                do_normalize=False,
-                size=config.MODEL_CONFIG["image_size"],
-            )
-            model = MaskFormerForInstanceSegmentation.from_pretrained(
-                config.MODEL_CONFIG["pretrained_path"],
-                num_labels=2,
-                ignore_mismatched_sizes=True,
-            )
-        if config.MODEL_TYPE == "mask2former":
-            image_processor = Mask2FormerImageProcessor(
-                do_resize=True,
-                image_mean=STATS_MEAN,
-                image_std=STATS_STD,
-                do_rescale=False,
-                size=config.MODEL_CONFIG["image_size"],
-            )
-            label_processor = Mask2FormerImageProcessor(
-                do_resize=True,
-                do_rescale=False,
-                do_normalize=False,
-                size=config.MODEL_CONFIG["image_size"],
-            )
-            model = Mask2FormerForUniversalSegmentation.from_pretrained(
-                config.MODEL_CONFIG["pretrained_path"],
-                num_labels=2,
-                ignore_mismatched_sizes=True,
-            )
-        if config.MODEL_TYPE == "unet":
-            image_processor = SegformerImageProcessor(
-                do_resize=True,
-                image_mean=STATS_MEAN,
-                image_std=STATS_STD,
-                do_rescale=False,
-                size=config.MODEL_CONFIG["image_size"],
-            )
-            label_processor = SegformerImageProcessor(
-                do_resize=True,
-                do_rescale=False,
-                do_normalize=False,
-                size=config.MODEL_CONFIG["image_size"],
-            )
-            model = smp.Unet(
-                encoder_name=config.MODEL_CONFIG["model_version"],
-                encoder_depth=5,
-                encoder_weights="imagenet",
-                classes=config.MODEL_CONFIG["num_classes"],
-            )
-        if config.MODEL_TYPE == "dinov2":
-            image_processor = SegformerImageProcessor(
-                do_resize=False,
-                image_mean=STATS_MEAN,
-                image_std=STATS_STD,
-                do_rescale=False,
-                size=config.MODEL_CONFIG["image_size"],
-            )
-            label_processor = SegformerImageProcessor(
-                do_resize=False,
-                do_rescale=False,
-                do_normalize=False,
-                size=config.MODEL_CONFIG["image_size"],
-            )
-            model = Dinov2ForSemanticSegmentation(
-                "./config/model_config.yaml",
-                num_class=len(cfg.MODEL.class_of_interest) + 1,
-            )
-
-    if config.TASK == "classification":
-        if config.MODEL_TYPE == "vit":
-            image_processor = ViTImageProcessor(
-                do_resize=True,
-                image_mean=STATS_MEAN,
-                image_std=STATS_STD,
-                do_rescale=False,
-                size=config.MODEL_CONFIG["image_size"],
-            )
-            label_processor = None
-            model = ViTForImageClassification.from_pretrained(
-                config.MODEL_CONFIG["pretrained_path"],
-                num_labels=2,
-                ignore_mismatched_sizes=True,
-            )
+def model_initialization(config):
+    image_processor = SegformerImageProcessor(
+        do_resize=False,
+        image_mean=config.PRETRAIN.statistics_sen1flood.mean,
+        image_std=config.PRETRAIN.statistics_sen1flood.standard_deviation,
+        do_rescale=False,
+        size=config.MODEL.optimization.img_size,
+    )
+    label_processor = SegformerImageProcessor(
+        do_resize=False,
+        do_rescale=False,
+        do_normalize=False,
+        size=config.MODEL.optimization.img_size,
+    )
+    model = Dinov2ForSemanticSegmentation(cfg=config)
     return (model, image_processor, label_processor)
 
 
 def execute():
-    import shutil
-
-    DATASET = DATASET_DICT.get(config.MODEL_TYPE, Sen1FloodsDataset)
-    if "SLURM_PROCID" not in os.environ:
-        data_root = config.PATH["data_dir"]
-    else:
-        data_root = config.PATH["data_dir"]
-
-    model, image_processor, label_processor = model_initialization()
-    if cfg.FINETUNE.weights_finetune:
+    config = default_setup("./config/model_config.yaml")
+    DATASET = Sen1FloodsDataset
+    data_root = config.PATH.data_dir
+    model_outdir = config.PATH.model_outdir
+    model_name = config.MODEL_INFO.model_name
+    os.makedirs(os.path.join(model_outdir, model_name), exist_ok=True)
+    model, image_processor, label_processor = model_initialization(config)
+    # config.FINETUNE.weights_satlas_dino will be automatically loaded during dino ViT construction
+    # if config.FINETUNE.weights_satlas_pretrain exists, weights will be overrided
+    if config.PRETRAIN.weights_satlas_pretrain:
         state_dict = get_fp32_state_dict_from_zero_checkpoint(
-            cfg.FINETUNE.weights_finetune, tag=""
+            config.PRETRAIN.weights_satlas_pretrain, tag=""
         )
         model.load_state_dict(state_dict, strict=False)
         model.classifier = LinearClassifier(
             model.hidden_size,
             model.width,
             model.height,
-            num_class=len(cfg.MODEL.fine_tune_class) + 1,
+            num_class=len(config.MODEL_INFO.class_of_interest) + 1,
         )
         for param in model.parameters():
             param.requires_grad = False
@@ -201,7 +74,9 @@ def execute():
         kwargs_handlers=[ddp_kwargs],
         log_with="wandb",
         gradient_accumulation_steps=1,
-        project_dir=os.path.join(config.PATH["model_outdir"], MODEL_NAME),
+        project_dir=os.path.join(
+            config.PATH["model_outdir"], config.MODEL_INFO.model_name
+        ),
     )
 
     train_data = DATASET(
@@ -214,7 +89,7 @@ def execute():
     collate_fn = DATASET.collate_fn if hasattr(DATASET, "collate_fn") else None
     train_loader = DataLoader(
         train_data,
-        batch_size=config.HYPERPARAM["batch_size"],
+        batch_size=config.MODEL.optimization.batch_size,
         collate_fn=collate_fn,
         drop_last=True,
     )
@@ -226,7 +101,7 @@ def execute():
     )
     vali_loader = DataLoader(
         vali_data,
-        batch_size=config.HYPERPARAM["batch_size"],
+        batch_size=config.MODEL.optimization.batch_size,
         collate_fn=collate_fn,
         drop_last=True,
     )
@@ -234,7 +109,7 @@ def execute():
     trainer = trainer_deepspeed.Trainer(net=model)
 
     trainer.train_model(
-        epoch=config.HYPERPARAM["epochs"],
+        epoch=config.MODEL.optimization.num_epoch,
         train_loader=train_loader,
         vali_loader=vali_loader,
         accelerator=accelerator,

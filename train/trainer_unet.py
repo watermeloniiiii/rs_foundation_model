@@ -39,8 +39,8 @@ from torch.utils.data import DataLoader, DistributedSampler
 import torch.distributed as dist
 from model_saving_obj import ModelSavingObject
 
-import config.config_hf as config
-from config.config_hf import (
+import config.setup as config
+from config.setup import (
     PATH,
     HYPERPARAM,
     MODEL_CONFIG,

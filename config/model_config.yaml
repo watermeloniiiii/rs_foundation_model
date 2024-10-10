@@ -1,32 +1,88 @@
+PROJECT:
+  task: "finetune" # either "finetune" or "pretrain" 
+  pretrain: "dinov2"
+  downstream: "flood" # if task == "finetune", please specify the downstream task
+  model_idx: "1"
+  description: "continue pretraining with satlas multiple classes"
 PATH:
   data_dir: "/NAS6/Members/linchenxi/projects/RS_foundation_model/flood_prediction"
   log_outdir: "/NAS6/Members/linchenxi/projects/RS_foundation_model/logs"
   model_outdir: "/NAS6/Members/linchenxi/projects/RS_foundation_model/model"
 MODEL:
   class_of_interest:
-    - water
-    - developed
-    - 
-      - tree
-      - shrub
-      - grass
-    - crop
-  fine_tune_class:
-    - water
-  customized_weight: true
-  img_size: 512
-  batch_size: 8
-  num_epoch: 500
-  optimizer: "AdamW"
-  base_lr: 1e-5
-  total_steps_ratio: 0.2
-  warmup_steps_ratio: 0.01
-  num_train_samples: 1000
-  num_vali_samples: 1000
-DINO:
+    pretrain_class:
+      - water
+      - developed
+      - 
+        - tree
+        - shrub
+        - grass
+      - crop
+    pretrain_class_weight: []
+    finetune_class:
+      - water
+    finetune_class_weight:
+      - 0.1
+      - 0.5
+  optimization:
+    customized_weight: true
+    img_size: 512
+    batch_size: 8
+    num_epoch: 500
+    optimizer: "AdamW"
+    scheduler: null
+    weight_decay: 0
+    momentum: 0.99
+    base_lr: 6e-5
+    total_steps_ratio: 0.2
+    warmup_steps_ratio: 0.01
+    num_train_samples: 1000
+    num_vali_samples: 1000
+PRETRAIN:
   cfg_dino: "/NAS6/Members/linchenxi/projects/DINOV2/model3/config.yaml"
-  weights_dino: "/NAS6/Members/linchenxi/projects/DINOV2/model3/eval/training_12499/teacher_checkpoint.pth"
-  # weights_dino: []
-FINETUNE:
-  weights_finetune: "/NAS6/Members/linchenxi/projects/RS_foundation_model/model/dinov2_linear_2/best"
+  weights_dino_pretrain: "/NAS6/Members/linchenxi/projects/DINOV2/model3/eval/training_12499/teacher_checkpoint.pth"
+  weights_satlas_pretrain: "/NAS6/Members/linchenxi/projects/RS_foundation_model/model/dinov2_linear_2/best"
+  statistics_satlas:
+    mean:
+      - 91.392
+      - 79.3305
+      - 67.677
+      - 65.739
+      - 84.1245
+      - 93.1515
+      - 90.4485
+      - 75.6075
+      - 57.783
+    standard_deviation:
+      - 16.32
+      - 18.36
+      - 2.4225
+      - 12.24
+      - 17.085
+      - 20.4
+      - 21.675
+      - 18.87
+      - 15.3 
+  statistics_sen1flood:
+    mean:
+      - 1189.2240032217355
+      - 1335.7876259041898
+      - 1369.555378215939
+      - 1432.4846319273197
+      - 2329.1874191028446
+      - 2776.599471278697
+      - 2559.5920587145415
+      - 1986.2344462964788
+      - 1150.1873175658327
+    standard_deviation:
+      - 504.48473658532214
+      - 409.57012279339966
+      - 395.4498976071994
+      - 459.6583462832101
+      - 640.6401557563074
+      - 771.8186296160205
+      - 743.4712046089181
+      - 695.772232693198
+      - 522.1633726674359
+ 
 

@@ -18,8 +18,8 @@ from transformers import (
     MaskFormerImageProcessor,
     MaskFormerConfig,
 )
-import config.config_hf as config
-from config.config_hf import STATS_MEAN, STATS_STD
+import config.setup as config
+from config.setup import STATS_MEAN, STATS_STD
 from distributed.ddp_utils import init_default_settings, ddp_setup
 import train.trainer_unet as trainer_unet
 from data.dataset import SemanticSegmentationDataset, MaskFormerDataset

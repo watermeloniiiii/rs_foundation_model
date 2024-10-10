@@ -5,20 +5,11 @@
 """
 
 import os
-import time
 import math
 import torch
-import wandb
 import numpy as np
 import torch.optim as optim
-import torch.utils as utils
-from data.dataset import SemanticSegmentationDataset
-from torch.autograd import Variable
-from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
-import torch.nn as nn
 from typing import List
-from accelerate import DistributedDataParallelKwargs
-from accelerate import Accelerator
 from accelerate.utils import DummyOptim, DummyScheduler
 from collections import defaultdict
 
@@ -35,41 +26,24 @@ from torch.optim.lr_scheduler import (
     CyclicLR,
     OneCycleLR,
 )
-from torch.cuda.amp import GradScaler, autocast
 from transformers import (
     MaskFormerImageProcessor,
     SegformerImageProcessor,
     Mask2FormerImageProcessor,
 )
 from transformers.image_utils import make_list_of_images
-from transformers.models.maskformer.modeling_maskformer import (
-    MaskFormerForInstanceSegmentationOutput,
-)
 
 from typing import Optional
 from common.logger import logger
 from torch.utils.data import DataLoader
-import torch.distributed as dist
-
-from models.customized_segmention_model import Dinov2ForSemanticSegmentation
-
 import warnings
 
 warnings.filterwarnings("ignore")
 
-import config.config_hf as config
-from config.config_hf import (
-    TASK,
-    PATH,
-    HYPERPARAM,
-    MODEL_CONFIG,
-    SCHEDULER,
-    MODEL_TYPE,
-    MODEL_NAME,
-)
-from omegaconf import OmegaConf
+from config.setup import SCHEDULER
+from config.setup import default_setup
 
-cfg = OmegaConf.load("./config/model_config.yaml")
+config = default_setup("./config/model_config.yaml")
 
 IMAGE_PROCESSOR = {
     "segformer": SegformerImageProcessor(),
@@ -112,7 +86,7 @@ class Trainer(object):
         initialize an optimizer from either the definition of deepspeed optimizer or user-defined optimizer
         NOTE that the user-defined optimizer would be prioritized
         """
-        user_defined_optimizer = HYPERPARAM["optimizer"] is not None
+        user_defined_optimizer = config.MODEL.optimization.optimizer is not None
         deepspeed_defined_optimizer = not (
             self.accelerator.state.deepspeed_plugin is None
             or "optimizer"
@@ -129,24 +103,24 @@ class Trainer(object):
                 del self.accelerator.state.deepspeed_plugin.deepspeed_config[
                     "optimizer"
                 ]
-            if HYPERPARAM["optimizer"] == "Adam":
+            if config.MODEL.optimization.optimizer == "Adam":
                 optimizer = optim.Adam(
                     filter(lambda p: p.requires_grad, self.net.parameters()),
-                    lr=cfg.MODEL.base_lr,
-                    weight_decay=HYPERPARAM.get("weight_decay", 0),
+                    lr=config.MODEL.optimization.base_lr,
+                    weight_decay=config.MODEL.optimization.weight_decay,
                 )
-            elif HYPERPARAM["optimizer"] == "SGD":
+            elif config.MODEL.optimization.optimizer == "SGD":
                 optimizer = optim.SGD(
                     filter(lambda p: p.requires_grad, self.net.parameters()),
-                    lr=cfg.MODEL.base_lr,
-                    weight_decay=HYPERPARAM.get("weight_decay", 0),
-                    momentum=HYPERPARAM.get("momentum", 0),
+                    lr=config.MODEL.optimization.base_lr,
+                    weight_decay=config.MODEL.optimization.optimizerweight_decay,
+                    momentum=config.MODEL.optimization.momentum,
                 )
-            elif HYPERPARAM["optimizer"] == "AdamW":
+            elif config.MODEL.optimization.optimizer == "AdamW":
                 optimizer = optim.AdamW(
                     filter(lambda p: p.requires_grad, self.net.parameters()),
-                    lr=cfg.MODEL.base_lr,
-                    weight_decay=HYPERPARAM.get("weight_decay", 0),
+                    lr=config.MODEL.optimization.base_lr,
+                    weight_decay=config.MODEL.optimization.weight_decay,
                 )
         # otherwise if there's no user-defined optimizer but a deepspeed optimizer
         if not user_defined_optimizer and deepspeed_defined_optimizer:
@@ -162,8 +136,8 @@ class Trainer(object):
         This function is used to create necessary folders to save models, textbooks and images
         :return:
         """
-        model_folder = PATH["model_outdir"]
-        model_path = os.path.join(model_folder, MODEL_NAME)
+        model_folder = config.PATH.model_outdir
+        model_path = os.path.join(model_folder, config.MODEL_INFO.model_name)
         os.makedirs(model_folder, exist_ok=True)
         os.makedirs(model_path, exist_ok=True)
         # os.makedirs(os.path.join(model_path, "latest"), exist_ok=True)
@@ -176,7 +150,7 @@ class Trainer(object):
         initialize an optimizer from either the definition of deepspeed optimizer or user-defined optimizer
         NOTE that the user-defined optimizer would be prioritized
         """
-        user_defined_scheduler = HYPERPARAM["scheduler"] is not None
+        user_defined_scheduler = config.MODEL.optimization.scheduler is not None
         deepspeed_defined_scheduler = not (
             self.accelerator.state.deepspeed_plugin is None
             or "scheduler"
@@ -190,20 +164,20 @@ class Trainer(object):
                 del self.accelerator.state.deepspeed_plugin.deepspeed_config[
                     "scheduler"
                 ]
-            if HYPERPARAM["scheduler"] == "StepLR":
+            if config.MODEL.optimization.scheduler == "StepLR":
                 return StepLR(
                     self.optimizer,
                     step_size=SCHEDULER["StepLR"]["step_size"] * len(self.train_loader),
                     gamma=SCHEDULER["StepLR"]["gamma"],
                 )
-            elif HYPERPARAM["scheduler"] == "CLR":
+            elif config.MODEL.optimization.scheduler == "CLR":
                 return CyclicLR(
                     self.optimizer,
                     base_lr=SCHEDULER["CLR"]["base_lr"],
                     max_lr=SCHEDULER["CLR"]["max_lr"],
                     step_size_up=SCHEDULER["CLR"]["step_size"] * len(self.train_loader),
                 )
-            elif HYPERPARAM["scheduler"] == "ONECLR":
+            elif config.MODEL.optimization.scheduler == "ONECLR":
                 return OneCycleLR(
                     self.optimizer,
                     max_lr=SCHEDULER["ONECLR"]["max_lr"],
@@ -221,7 +195,7 @@ class Trainer(object):
                     math.ceil(
                         len(self.train_loader)
                         * self.epoch
-                        * cfg.MODEL.warmup_steps_ratio
+                        * config.MODEL.optimization.warmup_steps_ratio
                     )
                     // self.accelerator.gradient_accumulation_steps
                     // self.num_processes
@@ -231,31 +205,18 @@ class Trainer(object):
                     math.ceil(
                         len(self.train_loader)
                         * self.epoch
-                        * cfg.MODEL.total_steps_ratio
+                        * config.MODEL.optimization.total_steps_ratio
                     )
                     // self.accelerator.gradient_accumulation_steps
                     // self.num_processes
                 )
             return DummyScheduler(self.optimizer)
 
-    def process_model(self, model_type, net, inputs, input_values, tensor_type):
-        if model_type in ["maskformer", "mask2former"]:
-            pixel_values = input_values[inputs.index("pixel_values")].type(tensor_type)
-            mask_labels = input_values[inputs.index("mask_labels")]
-            class_labels = input_values[inputs.index("class_labels")]
-            outputs = net(pixel_values, mask_labels, class_labels)
-
-        elif model_type == "segformer":
-            image = input_values[inputs.index("image")].type(tensor_type)
-            label = input_values[inputs.index("label")].squeeze()
-            outputs = net(image, label)
-
-        elif model_type == "dinov2":
-            image = input_values[inputs.index("image")].type(tensor_type)
-            label = input_values[inputs.index("label")].squeeze()
-            date = input_values[inputs.index("date")].squeeze()
-            outputs = net(image, label, date)
-
+    def process_model(self, net, inputs, input_values, tensor_type):
+        image = input_values[inputs.index("image")].type(tensor_type)
+        label = input_values[inputs.index("label")].squeeze()
+        date = input_values[inputs.index("date")].squeeze()
+        outputs = net(image, label, date)
         return outputs.loss, outputs
 
     def training(self, epoch):
@@ -290,7 +251,7 @@ class Trainer(object):
                     else torch.FloatTensor
                 )
                 loss, _ = self.process_model(
-                    MODEL_TYPE, self.net, inputs, input_values, tensor_type
+                    self.net, inputs, input_values, tensor_type
                 )
                 gathered_loss = self.accelerator.gather_for_metrics(loss)
                 self.train_loss[epoch] += torch.mean(gathered_loss)
@@ -329,49 +290,34 @@ class Trainer(object):
                     else torch.FloatTensor
                 )
                 loss, outputs = self.process_model(
-                    MODEL_TYPE, self.net, inputs, input_values, tensor_type
+                    self.net, inputs, input_values, tensor_type
                 )
-                if TASK == "segmentation" and MODEL_TYPE not in ["unet"]:
-                    outputs = IMAGE_PROCESSOR[
-                        MODEL_TYPE
-                    ].post_process_semantic_segmentation(
-                        outputs=outputs,
-                        target_sizes=[
-                            (
-                                MODEL_CONFIG["image_size"],
-                                MODEL_CONFIG["image_size"],
-                            )
-                        ]
-                        * input_values[0].shape[0],
-                    )  # B, C, H, W
-                    prediction = torch.stack(outputs, dim=0)
-                elif TASK == "segmentation" and MODEL_TYPE in ["dinov2"]:
-                    prediction = (torch.nn.functional.sigmoid(outputs) > 0.5).to(
-                        torch.long
-                    )
-                else:
-                    prediction, _ = torch.argmax(outputs.cls_logits, dim=1).type(
-                        torch.cuda.LongTensor
-                    ), torch.argmax(outputs.all_logits, dim=1).type(
-                        torch.cuda.LongTensor
-                    )
+                outputs = SegformerImageProcessor().post_process_semantic_segmentation(
+                    outputs=outputs,
+                    target_sizes=[
+                        (
+                            config.MODEL.optimization.img_size,
+                            config.MODEL.optimization.img_size,
+                        )
+                    ]
+                    * input_values[0].shape[0],
+                )  # B, C, H, W
+                prediction = torch.stack(outputs, dim=0)
+                # prediction = (torch.nn.functional.sigmoid(outputs) > 0.5).to(torch.long)
+                labels = input_values[inputs.index("label")]
+
                 IOU_metric = MeanIoU(
-                    num_classes=len(config.class_of_interest) + 1
+                    num_classes=len(config.MODEL_INFO.class_of_interest) + 1
                 ).cuda()
                 Precision_metric = MulticlassPrecision(
-                    num_classes=len(config.class_of_interest) + 1
+                    num_classes=len(config.MODEL_INFO.class_of_interest) + 1
                 ).cuda()
                 Recall_metric = MulticlassRecall(
-                    num_classes=len(config.class_of_interest) + 1
+                    num_classes=len(config.MODEL_INFO.class_of_interest) + 1
                 ).cuda()
                 F1_metric = MulticlassF1Score(
-                    num_classes=len(config.class_of_interest) + 1
+                    num_classes=len(config.MODEL_INFO.class_of_interest) + 1
                 ).cuda()
-                labels = (
-                    input_values[inputs.index("label")]
-                    if MODEL_TYPE != "vit"
-                    else labels
-                )
                 if len(labels.shape) != len(prediction.shape):
                     labels = labels.squeeze()
                     prediction = prediction.squeeze()
@@ -411,7 +357,10 @@ class Trainer(object):
             self._makefolders()
             if save_best_flag:
                 self.net.save_checkpoint(
-                    save_dir=os.path.join(PATH["model_outdir"], MODEL_NAME), tag="best"
+                    save_dir=os.path.join(
+                        config.PATH.model_outdir, config.MODEL_INFO.model_name
+                    ),
+                    tag="best",
                 )
 
     def train_model(
@@ -441,12 +390,12 @@ class Trainer(object):
         self.login = False
 
         self.accelerator.init_trackers(
-            project_name=f"DINOv2_segmentation_{config.MODEL_TYPE}",
-            config=config.HYPERPARAM,
+            project_name=f"DINOv2_downstreams",
+            config=dict(config),
             init_kwargs={
                 "wandb": {
                     "entity": "chenxilin",
-                    "name": config.MODEL_NAME,
+                    "name": config.MODEL_INFO.model_name,
                 }
             },
         )

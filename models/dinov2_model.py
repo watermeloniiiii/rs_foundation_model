@@ -1,9 +1,7 @@
-from argparse import Namespace
 import torch
 import torch.nn as nn
 from omegaconf import OmegaConf
 import os
-from config.config_hf import MODEL_NAME
 import dinov2.distributed as distributed
 from dinov2.logging_dinov2 import setup_logging
 from dinov2.utils import utils
@@ -40,19 +38,18 @@ def setup(cfg):
     """
     Create configs and perform basic setups.
     """
-    cfg_dino = OmegaConf.load(cfg.DINO.cfg_dino)
+    cfg_dino = OmegaConf.load(cfg.PRETRAIN.cfg_dino)
     os.makedirs(cfg.PATH.log_outdir, exist_ok=True)
     os.makedirs(cfg.PATH.model_outdir, exist_ok=True)
-    os.makedirs(os.path.join(cfg.PATH.model_outdir, MODEL_NAME), exist_ok=True)
     default_setup(cfg)
-    write_config(cfg, os.path.join(cfg.PATH.model_outdir, MODEL_NAME))
+    write_config(cfg, os.path.join(cfg.PATH.model_outdir, cfg.MODEL_INFO.model_name))
     return cfg_dino
 
 
 def setup_and_build_model(model_cfg) -> Tuple[Any, torch.dtype]:
     cudnn.benchmark = True
     cfg_dino = setup(model_cfg)
-    model = build_model_for_eval(cfg_dino, model_cfg.DINO.weights_dino)
+    model = build_model_for_eval(cfg_dino, model_cfg.PRETRAIN.weights_dino_pretrain)
     autocast_dtype = get_autocast_dtype(cfg_dino)
     return model, cfg_dino
 
@@ -60,10 +57,9 @@ def setup_and_build_model(model_cfg) -> Tuple[Any, torch.dtype]:
 class DINOV2PretrainedModel(nn.Module):
     def __init__(self, cfg) -> None:
         super().__init__()
-        model_cfg = OmegaConf.load(cfg)
-        model, config = setup_and_build_model(model_cfg)
+        model, cfg = setup_and_build_model(cfg)
         self.model = model
-        self.config = config
+        self.config = cfg
 
     def forward(self, input):
         return self.model(input, is_training=True)

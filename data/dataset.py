@@ -19,8 +19,8 @@ from transformers import MaskFormerImageProcessor
 from common.geoimage.raster_dataset import RasterDataset
 from common.img_utils.img_geom import rotate, flip
 from common.logger import logger
-from config import config_hf as config
-from config.config_hf import STATS_MEAN, STATS_STD
+from config import setup as config
+from config.setup import STATS_MEAN, STATS_STD
 
 BAND_ORDER = {"tci": 0, "b05": 0, "b06": 0, "b07": 0, "b08": 0, "b11": 0, "b12": 0}
 BANDS = {"tci": (480427, 0, 52255), "all": (480329, 0, 52247)}

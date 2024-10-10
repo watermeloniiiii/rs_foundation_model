@@ -31,8 +31,8 @@ from transformers import (
     ViTForImageClassification,
 )
 from models.customized_segmention_model import Dinov2ForSemanticSegmentation
-import config.config_hf as config
-from config.config_hf import (
+import config.setup as config
+from config.setup import (
     PATH,
     MODEL_CONFIG,
     STATS_MEAN,
