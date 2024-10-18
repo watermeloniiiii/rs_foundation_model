@@ -431,31 +431,29 @@ class Inference:
 
 if __name__ == "__main__":
     from deepspeed.utils.zero_to_fp32 import get_fp32_state_dict_from_zero_checkpoint
+    from omegaconf import OmegaConf
 
-    for idx in range(2, 3):
-        task = "segmentation"
-        model = "dinov2_linear"
-        name = f"{model}_{idx}"
-        save_folder = (
-            f"/NAS6/Members/linchenxi/projects/RS_foundation_model/inference/{name}"
-        )
-        os.makedirs(os.path.join(save_folder, "result"), exist_ok=True)
-        os.makedirs(os.path.join(save_folder, "accuracy"), exist_ok=True)
-        model_path = f"/NAS6/Members/linchenxi/projects/RS_foundation_model/model/{name}/best"  # noqa:E501
-        m = Dinov2ForSemanticSegmentation()
-        state_dict = get_fp32_state_dict_from_zero_checkpoint(model_path, tag="")
-        m.load_state_dict(state_dict)
-        logger.info(f"now inferencing with {name}")
-        if not os.path.exists(model_path):
-            continue
-        gpu_ids = [0, 1, 2, 3, 4, 5, 6, 7]
-        cur_output_folder = os.path.join(save_folder)
-        if not os.path.exists(cur_output_folder):
-            os.makedirs(cur_output_folder)
-        inferencer = Inference(
-            model_instance=m,
-            model_id=name,
-            save_folder=cur_output_folder,
-            gpu_ids=gpu_ids,
-        )
-        inferencer.main(task=task, return_lst=True, skip_exists=False, evaluate=True)
+    cfg = OmegaConf.load(
+        "/NAS6/Members/linchenxi/projects/RS_foundation_model/model/finetune_dinov2_flood_1/config.yaml"
+    )
+    save_folder = (
+        f"/NAS6/Members/linchenxi/projects/RS_foundation_model/inference/{name}"
+    )
+    os.makedirs(os.path.join(save_folder, "result"), exist_ok=True)
+    os.makedirs(os.path.join(save_folder, "accuracy"), exist_ok=True)
+    model_path = f"/NAS6/Members/linchenxi/projects/RS_foundation_model/model/{name}/best"  # noqa:E501
+    m = Dinov2ForSemanticSegmentation()
+    state_dict = get_fp32_state_dict_from_zero_checkpoint(model_path, tag="")
+    m.load_state_dict(state_dict)
+    logger.info(f"now inferencing with {name}")
+    gpu_ids = [0, 1, 2, 3, 4, 5, 6, 7]
+    cur_output_folder = os.path.join(save_folder)
+    if not os.path.exists(cur_output_folder):
+        os.makedirs(cur_output_folder)
+    inferencer = Inference(
+        model_instance=m,
+        model_id=name,
+        save_folder=cur_output_folder,
+        gpu_ids=gpu_ids,
+    )
+    inferencer.main(task=task, return_lst=True, skip_exists=False, evaluate=True)

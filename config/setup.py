@@ -13,12 +13,13 @@ def default_setup(config):
     pretrain = cfg.PROJECT.pretrain
     downstream = cfg.PROJECT.downstream
     model_idx = cfg.PROJECT.model_idx
-    model_name = f"{task}_{pretrain}_"
+    model_name = f"{task}_"
+    model_name += f"{pretrain}_" if pretrain else "np_"
     if downstream:
         model_name += downstream + "_"
     model_name += model_idx
     if task == "pretrain":
-        class_of_interest = cfg.class_of_interest.pretrain_class
+        class_of_interest = cfg.MODEL.class_of_interest.pretrain_class
         class_weight = cfg.MODEL.class_of_interest.pretrain_class_weight
         pretrain_weight = cfg.PRETRAIN.weights_dino_pretrain
     if task == "finetune":

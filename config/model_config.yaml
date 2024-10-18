@@ -1,11 +1,13 @@
 PROJECT:
-  task: "finetune" # either "finetune" or "pretrain" 
+  task: "pretrain" # either "finetune" or "pretrain" 
   pretrain: "dinov2"
-  downstream: "flood" # if task == "finetune", please specify the downstream task
-  model_idx: "1"
-  description: "continue pretraining with satlas multiple classes"
+  downstream: null # if task == "finetune", please specify the downstream task
+  model_idx: "8"
+  # description: "continue pretraining with satlas multiple classes"
+  description: "pretraining with satlas multiple classes from scratch, freeze the backbone"
 PATH:
-  data_dir: "/NAS6/Members/linchenxi/projects/RS_foundation_model/flood_prediction"
+  # data_dir: "/NAS6/Members/linchenxi/projects/RS_foundation_model/flood_prediction"
+  data_dir: "/NAS6/Members/linchenxi/projects/RS_foundation_model/satlas"
   log_outdir: "/NAS6/Members/linchenxi/projects/RS_foundation_model/logs"
   model_outdir: "/NAS6/Members/linchenxi/projects/RS_foundation_model/model"
 MODEL:
@@ -32,16 +34,16 @@ MODEL:
     optimizer: "AdamW"
     scheduler: null
     weight_decay: 0
-    momentum: 0.99
-    base_lr: 6e-5
+    momentum: 0.9
+    base_lr: 5e-5
     total_steps_ratio: 0.2
     warmup_steps_ratio: 0.01
-    num_train_samples: 1000
+    num_train_samples: 2000
     num_vali_samples: 1000
 PRETRAIN:
   cfg_dino: "/NAS6/Members/linchenxi/projects/DINOV2/model3/config.yaml"
   weights_dino_pretrain: "/NAS6/Members/linchenxi/projects/DINOV2/model3/eval/training_12499/teacher_checkpoint.pth"
-  weights_satlas_pretrain: "/NAS6/Members/linchenxi/projects/RS_foundation_model/model/dinov2_linear_2/best"
+  weights_satlas_pretrain: "/NAS6/Members/linchenxi/projects/RS_foundation_model/model/dinov2_baseline_1/best"
   statistics_satlas:
     mean:
       - 91.392

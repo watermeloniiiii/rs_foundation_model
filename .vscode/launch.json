@@ -32,7 +32,7 @@
             "args": [
                 "--config_file",
                 "/NAS6/Members/linchenxi/morocco/config/accelerate_deepspeed_config.yaml",
-                "main/flood_prediction.py",
+                "main/satlas_multiclass.py",
             ]
         },
         {

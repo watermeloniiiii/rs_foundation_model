@@ -19,8 +19,7 @@ from transformers import MaskFormerImageProcessor
 from common.geoimage.raster_dataset import RasterDataset
 from common.img_utils.img_geom import rotate, flip
 from common.logger import logger
-from config import setup as config
-from config.setup import STATS_MEAN, STATS_STD
+
 
 BAND_ORDER = {"tci": 0, "b05": 0, "b06": 0, "b07": 0, "b08": 0, "b11": 0, "b12": 0}
 BANDS = {"tci": (480427, 0, 52255), "all": (480329, 0, 52247)}
@@ -130,26 +129,26 @@ class SemanticSegmentationDataset(Dataset):
         self.label_processor = label_processor
         self.class_of_interest = class_of_interest
 
-        # if no customized weight is provided, will calculate the weights among different classes
-        if not config.customized_weight:
-            self.sample_cnt = self._build_crop_cnt_list()
-            self.weight_list = [
-                i / sum(list(self.sample_cnt.values()))
-                for i in list(self.sample_cnt.values())
-            ]
-            logger.info(
-                f"The weights among all classes are {self.weight_list} based on calculation"
-            )
-        else:
-            self.weight_list = [
-                i / sum(config.HYPERPARAM["weight"])
-                for i in config.HYPERPARAM["weight"]
-            ]
-        if STATS_MEAN or STATS_STD:
-            self.mean = STATS_MEAN
-            self.std = STATS_STD
-        else:
-            self.mean, self.std = self._get_stats()
+        # # if no customized weight is provided, will calculate the weights among different classes
+        # if not config.customized_weight:
+        #     self.sample_cnt = self._build_crop_cnt_list()
+        #     self.weight_list = [
+        #         i / sum(list(self.sample_cnt.values()))
+        #         for i in list(self.sample_cnt.values())
+        #     ]
+        #     logger.info(
+        #         f"The weights among all classes are {self.weight_list} based on calculation"
+        #     )
+        # else:
+        #     self.weight_list = [
+        #         i / sum(config.HYPERPARAM["weight"])
+        #         for i in config.HYPERPARAM["weight"]
+        #     ]
+        # if STATS_MEAN or STATS_STD:
+        #     self.mean = STATS_MEAN
+        #     self.std = STATS_STD
+        # else:
+        #     self.mean, self.std = self._get_stats()
 
     def _scale_percentile_img(self, matrix):
         # matrix = matrix.transpose(2, 0, 1).astype(np.float)

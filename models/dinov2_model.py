@@ -49,7 +49,9 @@ def setup(cfg):
 def setup_and_build_model(model_cfg) -> Tuple[Any, torch.dtype]:
     cudnn.benchmark = True
     cfg_dino = setup(model_cfg)
-    model = build_model_for_eval(cfg_dino, model_cfg.PRETRAIN.weights_dino_pretrain)
+    model = build_model_for_eval(
+        cfg_dino, model_cfg.PROJECT.pretrain, model_cfg.PRETRAIN.weights_dino_pretrain
+    )
     autocast_dtype = get_autocast_dtype(cfg_dino)
     return model, cfg_dino
 

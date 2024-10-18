@@ -3,7 +3,8 @@
 
 import os
 import train.trainer_deepspeed as trainer_deepspeed
-from torch.utils.data import DataLoader
+import torch
+from torch.utils.data import DataLoader, DistributedSampler, SubsetRandomSampler
 from transformers import (
     SegformerImageProcessor,
 )
@@ -13,6 +14,7 @@ from common.logger import logger
 from deepspeed.utils.zero_to_fp32 import get_fp32_state_dict_from_zero_checkpoint
 import config.setup as config
 from data.flood import Sen1FloodsDataset
+from data.dataset import SemanticSegmentationDataset
 from models.customized_segmention_model import (
     Dinov2ForSemanticSegmentation,
     LinearClassifier,
@@ -43,32 +45,18 @@ def model_initialization(config):
 
 
 def execute():
+    torch.manual_seed(111)
     config = default_setup("./config/model_config.yaml")
-    DATASET = Sen1FloodsDataset
+    DATASET = SemanticSegmentationDataset
     data_root = config.PATH.data_dir
     model_outdir = config.PATH.model_outdir
     model_name = config.MODEL_INFO.model_name
     os.makedirs(os.path.join(model_outdir, model_name), exist_ok=True)
     model, image_processor, label_processor = model_initialization(config)
-    # config.FINETUNE.weights_satlas_dino will be automatically loaded during dino ViT construction
-    # if config.FINETUNE.weights_satlas_pretrain exists, weights will be overrided
-    if config.PROJECT.task == "finetune":
-        assert (
-            config.PRETRAIN.weights_satlas_pretrain
-        ), "please provide pretrained weights"
-        state_dict = get_fp32_state_dict_from_zero_checkpoint(
-            config.PRETRAIN.weights_satlas_pretrain, tag=""
-        )
-        model.load_state_dict(state_dict, strict=False)
-        model.classifier = LinearClassifier(
-            model.hidden_size,
-            model.width,
-            model.height,
-            num_class=len(config.MODEL_INFO.class_of_interest) + 1,
-        )
-        for param in model.parameters():
-            param.requires_grad = False
-        for param in model.classifier.parameters():
+    for param in model.parameters():
+        param.requires_grad = False
+    for module in [model.feature_fusion, model.classifier]:
+        for param in module.parameters():
             param.requires_grad = True
     total_params_all = sum(p.numel() for p in model.parameters())
     logger.info(f"The total number of parameter of the model is {total_params_all}")
@@ -83,10 +71,11 @@ def execute():
     )
 
     train_data = DATASET(
-        root=os.path.join(data_root, "train"),
-        split=Sen1FloodsDataset.Split["TRAIN"],
+        root=data_root,
+        split=SemanticSegmentationDataset.Split["TRAIN"],
         image_processor=image_processor,
         label_processor=label_processor,
+        class_of_interest=config.MODEL_INFO.class_of_interest,
     )
 
     collate_fn = DATASET.collate_fn if hasattr(DATASET, "collate_fn") else None
@@ -95,18 +84,29 @@ def execute():
         batch_size=config.MODEL.optimization.batch_size,
         collate_fn=collate_fn,
         drop_last=True,
+        sampler=SubsetRandomSampler(
+            torch.randint(
+                0, len(train_data), (config.MODEL.optimization.num_train_samples,)
+            )
+        ),
     )
     vali_data = DATASET(
-        root=os.path.join(data_root, "val"),
-        split=Sen1FloodsDataset.Split["VAL"],
+        root=data_root,
+        split=SemanticSegmentationDataset.Split["TEST"],
         image_processor=image_processor,
         label_processor=label_processor,
+        class_of_interest=config.MODEL_INFO.class_of_interest,
     )
     vali_loader = DataLoader(
         vali_data,
         batch_size=config.MODEL.optimization.batch_size,
         collate_fn=collate_fn,
         drop_last=True,
+        sampler=SubsetRandomSampler(
+            torch.randint(
+                0, len(vali_data), (config.MODEL.optimization.num_vali_samples,)
+            )
+        ),
     )
     logger.info(f"{len(vali_loader)}")
     trainer = trainer_deepspeed.Trainer(net=model)
