@@ -10,10 +10,11 @@
 #SBATCH --export=ALL
 
 
-VENV_DIR=/NAS6/Members/linchenxi/foundation_model/venv
-CHDIR=/NAS6/Members/linchenxi/foundation_model
 
-export PYTHONPATH=$VENV_DIR/lib/python3.9/site-packages:$PYTHONPATH:/NAS6/Members/linchenxi/satellite-platform-gitlab:/NAS6/Members/linchenxi/dinov2
+VENV_DIR=/NAS3/Members/linchenxi/rs_foundation_model/venv
+CHDIR=/NAS3/Members/linchenxi/rs_foundation_model
+
+export PYTHONPATH=$VENV_DIR/lib/python3.9/site-packages:$PYTHONPATH:/NAS6/Members/linchenxi/satellite-platform-gitlab:/NAS3/Members/linchenxi/dinov2
 export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
 export PATH=$PATH:$CHDIR
 cd $CHDIR

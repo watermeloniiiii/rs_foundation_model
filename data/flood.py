@@ -17,7 +17,7 @@ from common.logger import logger
 
 from config.setup import default_setup
 
-config = default_setup("./config/model_config.yaml")
+config = default_setup("./config/finetune.yaml")
 
 BAND_ORDER = [3, 2, 1, 4, 5, 6, 7, 10, 11]
 LANDCOVER = {0: "Background", 1: "Water"}

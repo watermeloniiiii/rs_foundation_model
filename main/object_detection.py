@@ -5,27 +5,21 @@ import os
 import train.trainer_deepspeed as trainer_deepspeed
 import torch
 from torch.utils.data import DataLoader, DistributedSampler, SubsetRandomSampler
-from transformers import (
-    SegformerImageProcessor,
-)
+from transformers import DetrImageProcessor
 from accelerate import DistributedDataParallelKwargs
 from accelerate import Accelerator
 from common.logger import logger
-from deepspeed.utils.zero_to_fp32 import get_fp32_state_dict_from_zero_checkpoint
-import config.setup as config
-from data.flood import Sen1FloodsDataset
+from transformers import DetrForObjectDetection
 from data.dataset import SemanticSegmentationDataset
-from models.customized_segmention_model import (
-    Dinov2ForSemanticSegmentation,
-    LinearClassifier,
-)
-from config.setup import default_setup
-
+from config.object_detection.setup import default_setup
 from transformers import (
     SegformerImageProcessor,
 )
-
 import sys
+from detr.models.detr import DETR
+from detr.datasets.coco import CocoDetection
+from PIL import Image
+import requests
 
 script_dir = os.path.dirname(__file__)  # Directory of the current script (main.py)
 parent_dir = os.path.dirname(script_dir)  # Parent directory where dataset.py is located
@@ -33,40 +27,20 @@ sys.path.append(parent_dir)
 
 
 def model_initialization(config):
-    image_processor = SegformerImageProcessor(
-        do_resize=False,
-        image_mean=config.PRETRAIN.statistics_sen1flood.mean,
-        image_std=config.PRETRAIN.statistics_sen1flood.standard_deviation,
-        do_rescale=False,
-        size=config.MODEL.optimization.img_size,
-    )
-    label_processor = SegformerImageProcessor(
-        do_resize=False,
-        do_rescale=False,
-        do_normalize=False,
-        size=config.MODEL.optimization.img_size,
-    )
-    model = Dinov2ForSemanticSegmentation(cfg=config)
-    return (model, image_processor, label_processor)
+    processor = DetrImageProcessor.from_pretrained("facebook/detr-resnet-50")
+    model = DetrForObjectDetection.from_pretrained("facebook/detr-resnet-50")
+    return (model, processor)
 
 
 def execute():
-    import os
-
     torch.manual_seed(111)
-    config = default_setup("./config/model_config.yaml")
-    DATASET = SemanticSegmentationDataset
+    config = default_setup("./config/object_detection/object_detection_detr.yaml")
+    DATASET = CocoDetection
     data_root = config.PATH.data_dir
     model_outdir = config.PATH.model_outdir
     model_name = config.MODEL_INFO.model_name
     os.makedirs(os.path.join(model_outdir, model_name), exist_ok=True)
-    model, image_processor, label_processor = model_initialization(config)
-    if config.MODEL.architecture.freeze_backbone:
-        for param in model.parameters():
-            param.requires_grad = False
-        for module in [model.feature_fusion, model.classifier]:
-            for param in module.parameters():
-                param.requires_grad = True
+    model, processor = model_initialization(config)
     total_params_all = sum(p.numel() for p in model.parameters())
     logger.info(f"The total number of parameter of the model is {total_params_all}")
     ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
@@ -80,11 +54,10 @@ def execute():
     )
 
     train_data = DATASET(
-        root=data_root,
-        split=SemanticSegmentationDataset.Split["TRAIN"],
-        image_processor=image_processor,
-        label_processor=label_processor,
-        class_of_interest=config.MODEL_INFO.class_of_interest,
+        img_folder=os.path.join(data_root, "train2017"),
+        ann_file=os.path.join(data_root, "annotations/instances_train2017.json"),
+        transforms=None,
+        return_masks=True,
     )
 
     collate_fn = DATASET.collate_fn if hasattr(DATASET, "collate_fn") else None
@@ -100,11 +73,10 @@ def execute():
         ),
     )
     vali_data = DATASET(
-        root=data_root,
-        split=SemanticSegmentationDataset.Split["TEST"],
-        image_processor=image_processor,
-        label_processor=label_processor,
-        class_of_interest=config.MODEL_INFO.class_of_interest,
+        img_folder=os.path.join(data_root, "val2017"),
+        ann_file=os.path.join(data_root, "annotations/instances_val2017.json"),
+        transforms=None,
+        return_masks=True,
     )
     vali_loader = DataLoader(
         vali_data,
@@ -118,7 +90,7 @@ def execute():
         ),
     )
     logger.info(f"{len(vali_loader)}")
-    trainer = trainer_deepspeed.Trainer(net=model)
+    trainer = trainer_deepspeed.Trainer(net=model, config=config)
 
     trainer.train_model(
         epoch=config.MODEL.optimization.num_epoch,

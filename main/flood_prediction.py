@@ -4,6 +4,7 @@
 import os
 import train.trainer_deepspeed as trainer_deepspeed
 from torch.utils.data import DataLoader
+import torch.nn as nn
 from transformers import (
     SegformerImageProcessor,
 )
@@ -23,6 +24,8 @@ from transformers import (
     SegformerImageProcessor,
 )
 
+from models.dinov2_model import write_config
+
 
 def model_initialization(config):
     image_processor = SegformerImageProcessor(
@@ -38,18 +41,24 @@ def model_initialization(config):
         do_normalize=False,
         size=config.MODEL.optimization.img_size,
     )
-    model = Dinov2ForSemanticSegmentation(cfg=config)
+    model = Dinov2ForSemanticSegmentation(cfg=config, save_cfg=False)
     return (model, image_processor, label_processor)
 
 
 def execute():
-    config = default_setup("./config/model_config.yaml")
+    config = default_setup("./config/finetune.yaml")
     DATASET = Sen1FloodsDataset
     data_root = config.PATH.data_dir
     model_outdir = config.PATH.model_outdir
     model_name = config.MODEL_INFO.model_name
     os.makedirs(os.path.join(model_outdir, model_name), exist_ok=True)
-    model, image_processor, label_processor = model_initialization(config)
+    assert config.PRETRAIN.cfg_satlas, "Please provide config file"
+    model, image_processor, label_processor = model_initialization(
+        default_setup(config.PRETRAIN.cfg_satlas)
+    )
+    write_config(
+        config, os.path.join(config.PATH.model_outdir, config.MODEL_INFO.model_name)
+    )
     # config.FINETUNE.weights_satlas_dino will be automatically loaded during dino ViT construction
     # if config.FINETUNE.weights_satlas_pretrain exists, weights will be overrided
     if config.PROJECT.task == "finetune":
@@ -60,16 +69,15 @@ def execute():
             config.PRETRAIN.weights_satlas_pretrain, tag=""
         )
         model.load_state_dict(state_dict, strict=False)
-        model.classifier = LinearClassifier(
-            model.hidden_size,
-            model.width,
-            model.height,
-            num_class=len(config.MODEL_INFO.class_of_interest) + 1,
+        model.classifier.classifier = nn.utils.weight_norm(
+            nn.Conv2d(model.classifier.bottleneck_dim, 2, 1)
         )
+        model.classifier.classifier.weight_g.data.fill_(1)
         for param in model.parameters():
             param.requires_grad = False
         for param in model.classifier.parameters():
             param.requires_grad = True
+        model.classifier.classifier.weight_g.requires_grad = False
     total_params_all = sum(p.numel() for p in model.parameters())
     logger.info(f"The total number of parameter of the model is {total_params_all}")
     ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
@@ -109,7 +117,7 @@ def execute():
         drop_last=True,
     )
     logger.info(f"{len(vali_loader)}")
-    trainer = trainer_deepspeed.Trainer(net=model)
+    trainer = trainer_deepspeed.Trainer(net=model, config=config)
 
     trainer.train_model(
         epoch=config.MODEL.optimization.num_epoch,

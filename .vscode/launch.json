@@ -31,8 +31,8 @@
             },
             "args": [
                 "--config_file",
-                "/NAS6/Members/linchenxi/morocco/config/accelerate_deepspeed_config.yaml",
-                "main/satlas_multiclass.py",
+                "/NAS3/Members/linchenxi/rs_foundation_model/config/accelerate_deepspeed_config.yaml",
+                "main/object_detection.py",
             ]
         },
         {
@@ -41,12 +41,12 @@
             "request": "launch",
             "justMyCode": false,
             "console": "integratedTerminal",
-            "program": "/NAS6/Members/linchenxi/morocco/venv/bin/deepspeed",
+            "program": "/NAS3/Members/linchenxi/rs_foundation_model/venv/bin/deepspeed",
             "args": [
                 "main/inference.py",
                 "--deepspeed",
                 "--deepspeed_config",
-                "/NAS6/Members/linchenxi/morocco/config/config_deepspeed.json"
+                "/NAS3/Members/linchenxi/rs_foundation_model/config/config_deepspeed.json"
             ]
         },
     ]

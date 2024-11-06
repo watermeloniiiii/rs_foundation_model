@@ -43,8 +43,6 @@ warnings.filterwarnings("ignore")
 from config.setup import SCHEDULER
 from config.setup import default_setup
 
-config = default_setup("./config/model_config.yaml")
-
 IMAGE_PROCESSOR = {
     "segformer": SegformerImageProcessor(),
     "dinov2": SegformerImageProcessor(),
@@ -78,15 +76,16 @@ def make_cuda_list(data: List):
 
 
 class Trainer(object):
-    def __init__(self, net):
+    def __init__(self, net, config):
         self.net = net
+        self.config = config
 
     def _select_optimizer(self):
         """
         initialize an optimizer from either the definition of deepspeed optimizer or user-defined optimizer
         NOTE that the user-defined optimizer would be prioritized
         """
-        user_defined_optimizer = config.MODEL.optimization.optimizer is not None
+        user_defined_optimizer = self.config.MODEL.optimization.optimizer is not None
         deepspeed_defined_optimizer = not (
             self.accelerator.state.deepspeed_plugin is None
             or "optimizer"
@@ -103,24 +102,24 @@ class Trainer(object):
                 del self.accelerator.state.deepspeed_plugin.deepspeed_config[
                     "optimizer"
                 ]
-            if config.MODEL.optimization.optimizer == "Adam":
+            if self.config.MODEL.optimization.optimizer == "Adam":
                 optimizer = optim.Adam(
                     filter(lambda p: p.requires_grad, self.net.parameters()),
-                    lr=config.MODEL.optimization.base_lr,
-                    weight_decay=config.MODEL.optimization.weight_decay,
+                    lr=self.config.MODEL.optimization.base_lr,
+                    weight_decay=self.config.MODEL.optimization.weight_decay,
                 )
-            elif config.MODEL.optimization.optimizer == "SGD":
+            elif self.config.MODEL.optimization.optimizer == "SGD":
                 optimizer = optim.SGD(
                     filter(lambda p: p.requires_grad, self.net.parameters()),
-                    lr=config.MODEL.optimization.base_lr,
-                    weight_decay=config.MODEL.optimization.optimizerweight_decay,
-                    momentum=config.MODEL.optimization.momentum,
+                    lr=self.config.MODEL.optimization.base_lr,
+                    weight_decay=self.config.MODEL.optimization.optimizerweight_decay,
+                    momentum=self.config.MODEL.optimization.momentum,
                 )
-            elif config.MODEL.optimization.optimizer == "AdamW":
+            elif self.config.MODEL.optimization.optimizer == "AdamW":
                 optimizer = optim.AdamW(
                     filter(lambda p: p.requires_grad, self.net.parameters()),
-                    lr=config.MODEL.optimization.base_lr,
-                    weight_decay=config.MODEL.optimization.weight_decay,
+                    lr=self.config.MODEL.optimization.base_lr,
+                    weight_decay=self.config.MODEL.optimization.weight_decay,
                 )
         # otherwise if there's no user-defined optimizer but a deepspeed optimizer
         if not user_defined_optimizer and deepspeed_defined_optimizer:
@@ -136,8 +135,8 @@ class Trainer(object):
         This function is used to create necessary folders to save models, textbooks and images
         :return:
         """
-        model_folder = config.PATH.model_outdir
-        model_path = os.path.join(model_folder, config.MODEL_INFO.model_name)
+        model_folder = self.config.PATH.model_outdir
+        model_path = os.path.join(model_folder, self.config.MODEL_INFO.model_name)
         os.makedirs(model_folder, exist_ok=True)
         os.makedirs(model_path, exist_ok=True)
         # os.makedirs(os.path.join(model_path, "latest"), exist_ok=True)
@@ -150,7 +149,7 @@ class Trainer(object):
         initialize an optimizer from either the definition of deepspeed optimizer or user-defined optimizer
         NOTE that the user-defined optimizer would be prioritized
         """
-        user_defined_scheduler = config.MODEL.optimization.scheduler is not None
+        user_defined_scheduler = self.config.MODEL.optimization.scheduler is not None
         deepspeed_defined_scheduler = not (
             self.accelerator.state.deepspeed_plugin is None
             or "scheduler"
@@ -164,20 +163,20 @@ class Trainer(object):
                 del self.accelerator.state.deepspeed_plugin.deepspeed_config[
                     "scheduler"
                 ]
-            if config.MODEL.optimization.scheduler == "StepLR":
+            if self.config.MODEL.optimization.scheduler == "StepLR":
                 return StepLR(
                     self.optimizer,
                     step_size=SCHEDULER["StepLR"]["step_size"] * len(self.train_loader),
                     gamma=SCHEDULER["StepLR"]["gamma"],
                 )
-            elif config.MODEL.optimization.scheduler == "CLR":
+            elif self.config.MODEL.optimization.scheduler == "CLR":
                 return CyclicLR(
                     self.optimizer,
                     base_lr=SCHEDULER["CLR"]["base_lr"],
                     max_lr=SCHEDULER["CLR"]["max_lr"],
                     step_size_up=SCHEDULER["CLR"]["step_size"] * len(self.train_loader),
                 )
-            elif config.MODEL.optimization.scheduler == "ONECLR":
+            elif self.config.MODEL.optimization.scheduler == "ONECLR":
                 return OneCycleLR(
                     self.optimizer,
                     max_lr=SCHEDULER["ONECLR"]["max_lr"],
@@ -195,7 +194,7 @@ class Trainer(object):
                     math.ceil(
                         len(self.train_loader)
                         * self.epoch
-                        * config.MODEL.optimization.warmup_steps_ratio
+                        * self.config.MODEL.optimization.warmup_steps_ratio
                     )
                     // self.accelerator.gradient_accumulation_steps
                     // self.num_processes
@@ -205,7 +204,7 @@ class Trainer(object):
                     math.ceil(
                         len(self.train_loader)
                         * self.epoch
-                        * config.MODEL.optimization.total_steps_ratio
+                        * self.config.MODEL.optimization.total_steps_ratio
                     )
                     // self.accelerator.gradient_accumulation_steps
                     // self.num_processes
@@ -296,8 +295,8 @@ class Trainer(object):
                     outputs=outputs,
                     target_sizes=[
                         (
-                            config.MODEL.optimization.img_size,
-                            config.MODEL.optimization.img_size,
+                            self.config.MODEL.optimization.img_size,
+                            self.config.MODEL.optimization.img_size,
                         )
                     ]
                     * input_values[0].shape[0],
@@ -307,16 +306,16 @@ class Trainer(object):
                 labels = input_values[inputs.index("label")]
 
                 IOU_metric = MeanIoU(
-                    num_classes=len(config.MODEL_INFO.class_of_interest) + 1
+                    num_classes=len(self.config.MODEL_INFO.class_of_interest) + 1
                 ).cuda()
                 Precision_metric = MulticlassPrecision(
-                    num_classes=len(config.MODEL_INFO.class_of_interest) + 1
+                    num_classes=len(self.config.MODEL_INFO.class_of_interest) + 1
                 ).cuda()
                 Recall_metric = MulticlassRecall(
-                    num_classes=len(config.MODEL_INFO.class_of_interest) + 1
+                    num_classes=len(self.config.MODEL_INFO.class_of_interest) + 1
                 ).cuda()
                 F1_metric = MulticlassF1Score(
-                    num_classes=len(config.MODEL_INFO.class_of_interest) + 1
+                    num_classes=len(self.config.MODEL_INFO.class_of_interest) + 1
                 ).cuda()
                 if len(labels.shape) != len(prediction.shape):
                     labels = labels.squeeze()
@@ -358,7 +357,7 @@ class Trainer(object):
             if save_best_flag:
                 self.net.save_checkpoint(
                     save_dir=os.path.join(
-                        config.PATH.model_outdir, config.MODEL_INFO.model_name
+                        self.config.PATH.model_outdir, self.config.MODEL_INFO.model_name
                     ),
                     tag="best",
                 )
@@ -391,11 +390,11 @@ class Trainer(object):
 
         self.accelerator.init_trackers(
             project_name=f"DINOv2_downstreams",
-            config=dict(config),
+            config=dict(self.config),
             init_kwargs={
                 "wandb": {
                     "entity": "chenxilin",
-                    "name": config.MODEL_INFO.model_name,
+                    "name": self.config.MODEL_INFO.model_name,
                 }
             },
         )

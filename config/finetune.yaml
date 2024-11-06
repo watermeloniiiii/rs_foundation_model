@@ -1,15 +1,15 @@
 PROJECT:
-  task: "pretrain" # either "finetune" or "pretrain" 
+  task: "finetune" # either "finetune" or "pretrain" 
   pretrain: "dinov2"
   downstream: null # if task == "finetune", please specify the downstream task
   model_idx: "8"
   # description: "continue pretraining with satlas multiple classes"
-  description: "pretraining with satlas multiple classes from scratch, freeze the backbone"
+  description: "finetune with Sen1Flood data "
 PATH:
   # data_dir: "/NAS6/Members/linchenxi/projects/RS_foundation_model/flood_prediction"
-  data_dir: "/NAS6/Members/linchenxi/projects/RS_foundation_model/satlas"
-  log_outdir: "/NAS6/Members/linchenxi/projects/RS_foundation_model/logs"
-  model_outdir: "/NAS6/Members/linchenxi/projects/RS_foundation_model/model"
+  data_dir: "/NAS3/Members/linchenxi/projects/foundation_model/flood_prediction"
+  log_outdir: "/NAS3/Members/linchenxi/projects/foundation_model/logs"
+  model_outdir: "/NAS3/Members/linchenxi/projects/foundation_model/model"
 MODEL:
   class_of_interest:
     pretrain_class:
@@ -35,15 +35,25 @@ MODEL:
     scheduler: null
     weight_decay: 0
     momentum: 0.9
-    base_lr: 5e-5
+    base_lr: 1e-4
     total_steps_ratio: 0.2
     warmup_steps_ratio: 0.01
-    num_train_samples: 2000
+    num_train_samples: 5000
     num_vali_samples: 1000
+  architecture:
+    freeze_backbone: true
+    use_projection: true
+    projection_dim_ratio: 0.5 # reduce the hidden space feature dimension by this ratio
+    num_layers: 2
+    use_init: true
+    use_bn: true
+    hidden_dim: 2048
+    bottleneck_dim: 256  
 PRETRAIN:
-  cfg_dino: "/NAS6/Members/linchenxi/projects/DINOV2/model3/config.yaml"
-  weights_dino_pretrain: "/NAS6/Members/linchenxi/projects/DINOV2/model3/eval/training_12499/teacher_checkpoint.pth"
-  weights_satlas_pretrain: "/NAS6/Members/linchenxi/projects/RS_foundation_model/model/dinov2_baseline_1/best"
+  cfg_dino: "/NAS3/Members/linchenxi/projects/DINOV2/model3/config.yaml"
+  cfg_satlas: "/NAS3/Members/linchenxi/projects/foundation_model/model/pretrain_dinov2_12/config.yaml"
+  weights_dino_pretrain: "/NAS3/Members/linchenxi/projects/DINOV2/model3/eval/training_12499/teacher_checkpoint.pth"
+  weights_satlas_pretrain: "/NAS3/Members/linchenxi/projects/foundation_model/model/pretrain_dinov2_12/best"
   statistics_satlas:
     mean:
       - 91.392
@@ -86,5 +96,5 @@ PRETRAIN:
       - 743.4712046089181
       - 695.772232693198
       - 522.1633726674359
- 
+
 

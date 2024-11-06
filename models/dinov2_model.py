@@ -34,7 +34,7 @@ def write_config(cfg, output_dir, name="config.yaml"):
     return saved_cfg_path
 
 
-def setup(cfg):
+def setup(cfg, save_cfg=True):
     """
     Create configs and perform basic setups.
     """
@@ -42,13 +42,16 @@ def setup(cfg):
     os.makedirs(cfg.PATH.log_outdir, exist_ok=True)
     os.makedirs(cfg.PATH.model_outdir, exist_ok=True)
     default_setup(cfg)
-    write_config(cfg, os.path.join(cfg.PATH.model_outdir, cfg.MODEL_INFO.model_name))
+    if save_cfg:
+        write_config(
+            cfg, os.path.join(cfg.PATH.model_outdir, cfg.MODEL_INFO.model_name)
+        )
     return cfg_dino
 
 
-def setup_and_build_model(model_cfg) -> Tuple[Any, torch.dtype]:
+def setup_and_build_model(model_cfg, save_cfg=True) -> Tuple[Any, torch.dtype]:
     cudnn.benchmark = True
-    cfg_dino = setup(model_cfg)
+    cfg_dino = setup(model_cfg, save_cfg)
     model = build_model_for_eval(
         cfg_dino, model_cfg.PROJECT.pretrain, model_cfg.PRETRAIN.weights_dino_pretrain
     )
@@ -57,9 +60,9 @@ def setup_and_build_model(model_cfg) -> Tuple[Any, torch.dtype]:
 
 
 class DINOV2PretrainedModel(nn.Module):
-    def __init__(self, cfg) -> None:
+    def __init__(self, cfg, save_cfg=True) -> None:
         super().__init__()
-        model, cfg = setup_and_build_model(cfg)
+        model, cfg = setup_and_build_model(cfg, save_cfg)
         self.model = model
         self.config = cfg
 
