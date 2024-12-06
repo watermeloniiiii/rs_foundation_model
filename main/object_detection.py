@@ -2,24 +2,16 @@
 # -*- coding: utf-8 -*-
 
 import os
-import train.trainer_deepspeed as trainer_deepspeed
+import train.trainer_coco_object_detection as trainer_coco
 import torch
 from torch.utils.data import DataLoader, DistributedSampler, SubsetRandomSampler
-from transformers import DetrImageProcessor
 from accelerate import DistributedDataParallelKwargs
 from accelerate import Accelerator
 from common.logger import logger
-from transformers import DetrForObjectDetection
-from data.dataset import SemanticSegmentationDataset
+from transformers import DetrForObjectDetection, DetrImageProcessor
 from config.object_detection.setup import default_setup
-from transformers import (
-    SegformerImageProcessor,
-)
 import sys
-from detr.models.detr import DETR
-from detr.datasets.coco import CocoDetection
-from PIL import Image
-import requests
+from data.coco import CocoDetection
 
 script_dir = os.path.dirname(__file__)  # Directory of the current script (main.py)
 parent_dir = os.path.dirname(script_dir)  # Parent directory where dataset.py is located
@@ -56,8 +48,7 @@ def execute():
     train_data = DATASET(
         img_folder=os.path.join(data_root, "train2017"),
         ann_file=os.path.join(data_root, "annotations/instances_train2017.json"),
-        transforms=None,
-        return_masks=True,
+        return_masks=False,
     )
 
     collate_fn = DATASET.collate_fn if hasattr(DATASET, "collate_fn") else None
@@ -75,8 +66,7 @@ def execute():
     vali_data = DATASET(
         img_folder=os.path.join(data_root, "val2017"),
         ann_file=os.path.join(data_root, "annotations/instances_val2017.json"),
-        transforms=None,
-        return_masks=True,
+        return_masks=False,
     )
     vali_loader = DataLoader(
         vali_data,
@@ -90,7 +80,7 @@ def execute():
         ),
     )
     logger.info(f"{len(vali_loader)}")
-    trainer = trainer_deepspeed.Trainer(net=model, config=config)
+    trainer = trainer_coco.Trainer(net=model, config=config)
 
     trainer.train_model(
         epoch=config.MODEL.optimization.num_epoch,
@@ -101,31 +91,4 @@ def execute():
 
 
 if __name__ == "__main__":
-    # import subprocess
-
-    # if config.mode == "debug":
-    #     from accelerate import debug_launcher
-
-    #     debug_launcher(function=execute(), num_processes=1)
-    # else:
-
-    #     def launch_accelerate():
-    #         # Define the command to execute
-    #         command = [
-    #             "accelerate",
-    #             "launch",
-    #             "--config_file",
-    #             "/NAS6/Members/linchenxi/morocco/accelerate_deepspeed_config.yaml",
-    #             # "--main_process_ip",
-    #             # "localhost",
-    #             # "--main_process_port",
-    #             # "0",
-    #             "main_accelerate.py",
-    #         ]
-
-    #         # Execute the command
-    #         subprocess.run(command)
-
-    #     # Call the function to launch accelerate
-    #     launch_accelerate()
     execute()

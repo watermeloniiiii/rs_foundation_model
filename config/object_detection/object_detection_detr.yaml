@@ -9,7 +9,7 @@ PATH:
   model_outdir: "/NAS3/Members/linchenxi/projects/object_detection/detr/model"
 MODEL:
   optimization:
-    batch_size: 64
+    batch_size: 8
     num_epoch: 500
     optimizer: "AdamW"
     scheduler: null
