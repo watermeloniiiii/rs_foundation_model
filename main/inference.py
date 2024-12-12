@@ -19,7 +19,7 @@ from typing import Optional, Tuple, List
 from common.geoimage.raster_dataset import RasterDataset, mosaic_raster_datasets
 from common.geoimage.scene_meta import ValueInterpretationMeta
 from common.logger import logger
-from data.dataset import (
+from data.satlas import (
     ClassificationDataset,
     SemanticSegmentationDataset,
 )
@@ -37,7 +37,7 @@ from torchmetrics.classification import (
 )
 from torchmetrics.segmentation import MeanIoU
 
-from data.flood import Sen1FloodsDataset
+from data.sen1floods11 import Sen1FloodsDataset
 
 IMAGE_PROCESSOR = {
     "dinov2": SegformerImageProcessor,

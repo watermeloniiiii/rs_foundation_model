@@ -13,10 +13,9 @@ from accelerate import Accelerator
 from common.logger import logger
 from deepspeed.utils.zero_to_fp32 import get_fp32_state_dict_from_zero_checkpoint
 import config.setup as config
-from data.flood import Sen1FloodsDataset
+from data.sen1floods11 import Sen1FloodsDataset
 from models.customized_segmention_model import (
     Dinov2ForSemanticSegmentation,
-    LinearClassifier,
 )
 from config.setup import default_setup
 
