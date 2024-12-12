@@ -3,14 +3,9 @@
 
 import os
 import train.trainer_deepspeed as trainer_deepspeed
-from torch.utils.data import DataLoader, DistributedSampler, SubsetRandomSampler
+from torch.utils.data import DataLoader, SubsetRandomSampler
 from transformers import (
-    SegformerForSemanticSegmentation,
     SegformerImageProcessor,
-    MaskFormerForInstanceSegmentation,
-    MaskFormerImageProcessor,
-    Mask2FormerForUniversalSegmentation,
-    Mask2FormerImageProcessor,
 )
 from accelerate import DistributedDataParallelKwargs
 from accelerate import Accelerator
@@ -20,7 +15,7 @@ import torch
 from common.logger import logger
 
 import config.setup as config
-from data.dataset import (
+from data.satlas import (
     SemanticSegmentationDataset,
     ClassificationDataset,
 )
