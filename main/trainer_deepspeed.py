@@ -4,50 +4,38 @@
 @authored by Chenxi
 """
 
+from accelerate.utils import DummyOptim, DummyScheduler
+from collections import defaultdict
+import numpy as np
 import os
 import math
 import torch
-import numpy as np
 import torch.optim as optim
-from typing import List
-from accelerate.utils import DummyOptim, DummyScheduler
-from collections import defaultdict
-
-# from sklearn.metrics import confusion_matrix, precision_score, recall_score
-from torchmetrics.classification import (
-    BinaryJaccardIndex,
-    MulticlassPrecision,
-    MulticlassRecall,
-    MulticlassF1Score,
-)
-from torchmetrics.segmentation import MeanIoU
 from torch.optim.lr_scheduler import (
     StepLR,
     CyclicLR,
     OneCycleLR,
 )
-from transformers import (
-    MaskFormerImageProcessor,
-    SegformerImageProcessor,
-    Mask2FormerImageProcessor,
-)
-from transformers.image_utils import make_list_of_images
-
-from typing import Optional
-from common.logger import logger
 from torch.utils.data import DataLoader
+from torchmetrics.segmentation import MeanIoU
+from torchmetrics.classification import (
+    MulticlassPrecision,
+    MulticlassRecall,
+    MulticlassF1Score,
+)
+from transformers import SegformerImageProcessor
+from typing import List, Optional
 import warnings
+
+
+from common.logger import logger
+from config.setup import SCHEDULER
+from dinov2.models.vision_transformer import DinoVisionTransformer
 
 warnings.filterwarnings("ignore")
 
-from config.setup import SCHEDULER
-from config.setup import default_setup
-
 IMAGE_PROCESSOR = {
-    "segformer": SegformerImageProcessor(),
     "dinov2": SegformerImageProcessor(),
-    "maskformer": MaskFormerImageProcessor(),
-    "mask2former": Mask2FormerImageProcessor(),
 }
 
 
@@ -68,11 +56,6 @@ def collate_fn(data):
     patch = patch.append(b["patch"] for b in data)
     name = name.append(b["name"] for b in data)
     return {"image": image, "patch": patch, "name": name, "label": label}
-
-
-def make_cuda_list(data: List):
-    data = [d.cuda() for d in data]
-    return data
 
 
 class Trainer(object):
@@ -133,13 +116,11 @@ class Trainer(object):
     def _makefolders(self):
         """
         This function is used to create necessary folders to save models, textbooks and images
-        :return:
         """
         model_folder = self.config.PATH.model_outdir
         model_path = os.path.join(model_folder, self.config.MODEL_INFO.model_name)
         os.makedirs(model_folder, exist_ok=True)
         os.makedirs(model_path, exist_ok=True)
-        # os.makedirs(os.path.join(model_path, "latest"), exist_ok=True)
         os.makedirs(os.path.join(model_path, "best"), exist_ok=True)
         self.model_folder = model_folder
         self.model_path = model_path
@@ -212,10 +193,20 @@ class Trainer(object):
             return DummyScheduler(self.optimizer)
 
     def process_model(self, net, inputs, input_values, tensor_type):
-        image = input_values[inputs.index("image")].type(tensor_type)
-        label = input_values[inputs.index("label")].squeeze()
-        date = input_values[inputs.index("date")].squeeze()
-        outputs = net(image, label, date)
+        if isinstance(net, DinoVisionTransformer):
+            # the regular vision transformer where we only need input from one source
+            image = input_values[inputs.index("image")].type(tensor_type)
+            label = input_values[inputs.index("label")].squeeze()
+            date = input_values[inputs.index("date")].squeeze()
+            outputs = net(image, label, date)
+        else:
+            # the customized model with multimodal input
+            # NOTE now we use hard coded "s1" and "s2" for multimodal datasets
+            s1 = input_values[inputs.index("s1")].type(tensor_type)
+            s2 = input_values[inputs.index("s2")].type(tensor_type)
+            label = input_values[inputs.index("label")].squeeze()
+            date = input_values[inputs.index("date")].squeeze()
+            outputs = net((s1, s2), label, date)
         return outputs.loss, outputs
 
     def training(self, epoch):

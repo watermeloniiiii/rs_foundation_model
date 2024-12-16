@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import os
-import train.trainer_deepspeed as trainer_deepspeed
+import main.trainer_deepspeed as trainer_deepspeed
 from torch.utils.data import DataLoader
 import torch.nn as nn
 from transformers import (

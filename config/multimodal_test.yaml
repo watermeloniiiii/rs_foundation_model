@@ -2,13 +2,14 @@ PROJECT:
   task: "pretrain" # either "finetune" or "pretrain" 
   pretrain: "dinov2"
   downstream: null # if task == "finetune", please specify the downstream task
-  model_idx: "12" 
-  description: "pretraining with satlas multiple classes from scratch, freeze the backbone and use mimic_DINOHEAD"
+  model_idx: "1" 
+  description: "to test the multimodal foundation model"
 PATH:
-  data_dir: "/NAS3/Members/linchenxi/projects/foundation_model/satlas"
+  data_dir: "/NAS3/Members/linchenxi/projects/foundation_model/sen12ms"
   log_outdir: "/NAS3/Members/linchenxi/projects/foundation_model/logs"
   model_outdir: "/NAS3/Members/linchenxi/projects/foundation_model/model"
 MODEL:
+  #----- NOT APPLICABLE -----#
   class_of_interest:
     pretrain_class:
       - water
@@ -24,9 +25,10 @@ MODEL:
     finetune_class_weight:
       - 0.1
       - 0.5
+  #----- NOT APPLICABLE -----#
   optimization:
     customized_weight: true
-    img_size: 512
+    img_size: 256
     batch_size: 64
     num_epoch: 500
     optimizer: "AdamW"
@@ -48,8 +50,8 @@ MODEL:
     hidden_dim: 2048
     bottleneck_dim: 256  
 PRETRAIN:
-  cfg_dino: "/NAS3/Members/linchenxi/projects/DINOV2/model3/config.yaml" # config file of the pretrained dinov2 model to reconstruct the model
-  weights_dino_pretrain: "/NAS3/Members/linchenxi/projects/DINOV2/model3/eval/training_12499/teacher_checkpoint.pth" # only applicable for continued pretraining
+  cfg_dino: "/NAS3/Members/linchenxi/projects/DINOV2/model_multimodal_linear_2/config.yaml" # config file of the pretrained dinov2 model to reconstruct the model
+  weights_dino_pretrain: "/NAS3/Members/linchenxi/projects/DINOV2/model_multimodal_linear_2/eval/training_3999/teacher_checkpoint.pth" # only applicable for continued pretraining
   weights_satlas_pretrain: "/NAS3/Members/linchenxi/projects/foundation_model/model/dinov2_baseline_1/best" # only applicable for downstream tasks
   statistics_satlas:
     mean:
@@ -93,5 +95,42 @@ PRETRAIN:
       - 743.4712046089181
       - 695.772232693198
       - 522.1633726674359
+  statistics_sen12ms:
+    mean_s1:
+      - -11.415
+      - -19.191
+    standard_deviation_s1:
+      - 4.5995106261427425
+      - 6.295987531753855
+    mean_s2:
+      - 3036.4113700000003
+      - 2842.2263000000003
+      - 2683.16342
+      - 2866.1911400000004
+      - 3013.40663
+      - 3429.34514
+      - 3683.54561
+      - 3555.69409
+      - 3840.27188
+      - 1689.06212
+      - 311.54035000000005
+      - 2732.52887
+      - 2098.23427
+    standard_deviation_s2:
+      - 23.232755303665556
+      - 23.497584322649
+      - 22.0600702854728
+      - 23.78249473877793
+      - 23.284778482948898
+      - 22.055317907479818
+      - 22.17036010081929
+      - 21.445922642777578
+      - 21.999025478416083
+      - 15.513665105319244
+      - 6.944271812076483
+      - 13.64875287343133
+      - 11.590661974192846
+
+
 
 

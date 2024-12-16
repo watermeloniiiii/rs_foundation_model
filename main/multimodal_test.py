@@ -16,23 +16,27 @@ from common.logger import logger
 
 # internal files
 from config.setup import default_setup
-from data.satlas import SemanticSegmentationDataset
-import main.trainer_deepspeed as trainer_deepspeed
-from models.customized_segmention_model import Dinov2ForSemanticSegmentation
-
-
-script_dir = os.path.dirname(__file__)  # Directory of the current script (main.py)
-parent_dir = os.path.dirname(script_dir)  # Parent directory where dataset.py is located
-sys.path.append(parent_dir)
+from data.sen12ms import SEN12MSDataset
+import trainer_deepspeed as trainer_deepspeed
+from rs_foundation_model.models.customized_segmention_model import (
+    Dinov2ForSemanticSegmentation,
+)
 
 torch.manual_seed(111)
 
 
 def model_initialization(config):
-    image_processor = SegformerImageProcessor(
+    image_processor_s1 = SegformerImageProcessor(
         do_resize=False,
-        image_mean=config.PRETRAIN.statistics_sen1flood.mean,
-        image_std=config.PRETRAIN.statistics_sen1flood.standard_deviation,
+        image_mean=config.PRETRAIN.statistics_sen12ms.mean_s1,
+        image_std=config.PRETRAIN.statistics_sen12ms.standard_deviation_s1,
+        do_rescale=False,
+        size=config.MODEL.optimization.img_size,
+    )
+    image_processor_s2 = SegformerImageProcessor(
+        do_resize=False,
+        image_mean=config.PRETRAIN.statistics_sen12ms.mean_s2,
+        image_std=config.PRETRAIN.statistics_sen12ms.standard_deviation_s2,
         do_rescale=False,
         size=config.MODEL.optimization.img_size,
     )
@@ -42,17 +46,19 @@ def model_initialization(config):
         do_normalize=False,
         size=config.MODEL.optimization.img_size,
     )
-    model = Dinov2ForSemanticSegmentation(cfg=config)
-    return (model, image_processor, label_processor)
+    model = Dinov2ForSemanticSegmentation(cfg=config, img_size=256, patch_size=16)
+    return (model, (image_processor_s1, image_processor_s2), label_processor)
 
 
 def execute():
-    config = default_setup("./config/continued_pretraining.yaml")
-    DATASET = SemanticSegmentationDataset
+    config = default_setup("./config/multimodal_test.yaml")
     data_root = config.PATH.data_dir
     model_outdir = config.PATH.model_outdir
     model_name = config.MODEL_INFO.model_name
     os.makedirs(os.path.join(model_outdir, model_name), exist_ok=True)
+
+    # load model parameters
+
     model, image_processor, label_processor = model_initialization(config)
     if config.MODEL.architecture.freeze_backbone:
         for param in model.parameters():
@@ -62,24 +68,26 @@ def execute():
                 param.requires_grad = True
     total_params_all = sum(p.numel() for p in model.parameters())
     logger.info(f"The total number of parameter of the model is {total_params_all}")
+
+    # initialize HuggingFace accerlerator
     ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
     accelerator = Accelerator(
         kwargs_handlers=[ddp_kwargs],
-        log_with="wandb",
+        log_with="wandb",  # I use wandb for recording purpose, can change this to other tools
         gradient_accumulation_steps=1,
         project_dir=os.path.join(
             config.PATH["model_outdir"], config.MODEL_INFO.model_name
         ),
     )
 
+    # initialize dataset and dataloader
+    DATASET = SEN12MSDataset
     train_data = DATASET(
         root=data_root,
-        split=SemanticSegmentationDataset.Split["TRAIN"],
+        split=SEN12MSDataset.Split["TRAIN"],
         image_processor=image_processor,
         label_processor=label_processor,
-        class_of_interest=config.MODEL_INFO.class_of_interest,
     )
-
     collate_fn = DATASET.collate_fn if hasattr(DATASET, "collate_fn") else None
     train_loader = DataLoader(
         train_data,
@@ -90,14 +98,13 @@ def execute():
             torch.randint(
                 0, len(train_data), (config.MODEL.optimization.num_train_samples,)
             )
-        ),
+        ),  # this sampler means that we only use a portion of all samples for effcient finetune
     )
     vali_data = DATASET(
         root=data_root,
-        split=SemanticSegmentationDataset.Split["TEST"],
+        split=SEN12MSDataset.Split["VAL"],
         image_processor=image_processor,
         label_processor=label_processor,
-        class_of_interest=config.MODEL_INFO.class_of_interest,
     )
     vali_loader = DataLoader(
         vali_data,
@@ -111,8 +118,9 @@ def execute():
         ),
     )
     logger.info(f"{len(vali_loader)}")
-    trainer = trainer_deepspeed.Trainer(net=model)
 
+    # initialize trainer -- the main training process
+    trainer = trainer_deepspeed.Trainer(net=model, config=config)
     trainer.train_model(
         epoch=config.MODEL.optimization.num_epoch,
         train_loader=train_loader,
