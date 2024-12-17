@@ -50,43 +50,6 @@ def trunc_normal_(tensor, mean=0.0, std=1.0, a=-2.0, b=2.0):
     return _no_grad_trunc_normal_(tensor, mean, std, a, b)
 
 
-class LinearClassifier(torch.nn.Module):
-    def __init__(
-        self,
-        in_channels,
-        tokenW=32,
-        tokenH=32,
-        num_class=1,
-        use_projection=False,
-        projection_dim_ratio=None,
-    ):
-        super(LinearClassifier, self).__init__()
-
-        self.in_channels = in_channels
-        self.width = tokenW
-        self.height = tokenH
-        self.use_projection = use_projection
-        self.test = nn.Linear(in_channels, num_class)
-        if self.use_projection:
-            assert projection_dim_ratio, "please provide dimension reduce ratio"
-            out_channels = in_channels * projection_dim_ratio
-            # self.projection = nn.Sequential(
-            #     nn.LayerNorm(),
-            #     torch.nn.Conv2d(in_channels, out_channels, (1, 1)),
-            #     nn.ReLU(),
-            # )
-        else:
-            out_channels = in_channels
-        self.classifier = torch.nn.Conv2d(out_channels, num_class, (1, 1))
-
-    def forward(self, embeddings):
-        embeddings = embeddings.reshape(-1, self.height, self.width, self.in_channels)
-        embeddings = embeddings.permute(0, 3, 1, 2)
-        if self.use_projection:
-            embeddings = self.projection(embeddings)
-        return self.classifier(embeddings)
-
-
 class mimic_DINOHead(nn.Module):
     def __init__(
         self,
@@ -159,9 +122,6 @@ class Dinov2ForSemanticSegmentation(nn.Module):
         self.num_register = self.dinov2.config.student.num_register_tokens
         self.height = self.width = img_size // patch_size
         self.feature_fusion = nn.Linear(self.hidden_size * 4, self.hidden_size)
-        # self.classifier = LinearClassifier(
-        #     self.hidden_size, self.width, self.height, num_class=self.num_class
-        # )
         self.classifier = mimic_DINOHead(
             in_dim=self.hidden_size,
             out_dim=self.num_class,

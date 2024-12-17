@@ -1,52 +1,33 @@
-import os
-import sys
-
-# Modify sys.path to include the directory containing dataset.py
-script_dir = os.path.dirname(__file__)  # Directory of the current script (main.py)
-parent_dir = os.path.dirname(script_dir)  # Parent directory where dataset.py is located
-sys.path.append(parent_dir)
-
 import collections
+from deepspeed.utils.zero_to_fp32 import get_fp32_state_dict_from_zero_checkpoint
 import json
+import matplotlib.pyplot as plt
+from omegaconf import OmegaConf
 import torch
 import torch.nn as nn
 import torch.backends.cudnn
 from tqdm import tqdm as tqdm
 from torch.utils.data import DataLoader
-import numpy as np
-from PIL import Image
-from typing import Optional, Tuple, List
-from common.geoimage.raster_dataset import RasterDataset, mosaic_raster_datasets
-from common.geoimage.scene_meta import ValueInterpretationMeta
-from common.logger import logger
-from data.satlas import (
-    ClassificationDataset,
-    SemanticSegmentationDataset,
-)
-from transformers import (
-    SegformerImageProcessor,
-)
-from models.customized_segmention_model import Dinov2ForSemanticSegmentation
-import config.setup as config
-import config.pretrained_model_path as MODEL_PATH
 from torchmetrics.classification import (
-    BinaryJaccardIndex,
     MulticlassPrecision,
     MulticlassRecall,
     MulticlassF1Score,
 )
 from torchmetrics.segmentation import MeanIoU
+from transformers import SegformerImageProcessor
+from typing import Optional, Tuple
+import os
 
+from common.logger import logger
+from data.satlas import SemanticSegmentationDataset
 from data.sen1floods11 import Sen1FloodsDataset
+from rs_foundation_model.models.customized_segmention_model import (
+    Dinov2ForSemanticSegmentation,
+)
 
 IMAGE_PROCESSOR = {
     "dinov2": SegformerImageProcessor,
 }
-
-
-def make_cuda_list(data: List):
-    data = [d.cuda() for d in data]
-    return data
 
 
 class Inference:
@@ -138,9 +119,9 @@ class Inference:
                 pred, prob = outputs
                 label = input_values[inputs.index("label")]
                 image_id = sample["image_id"]
-                IOU_metric = MeanIoU(
-                    num_classes=len(self.config.MODEL_INFO.class_of_interest) + 1
-                ).cuda()
+                # IOU_metric = MeanIoU(
+                #     num_classes=len(self.config.MODEL_INFO.class_of_interest) + 1
+                # ).cuda()
                 Precision_metric = MulticlassPrecision(
                     num_classes=len(self.config.MODEL_INFO.class_of_interest) + 1
                 ).cuda()
@@ -163,22 +144,17 @@ class Inference:
                 metrics["Prec"].append(Prec.mean().cpu().numpy())
                 metrics["Rec"].append(Rec.mean().cpu().numpy())
                 metrics["F1"].append(F1.mean().cpu().numpy())
-
+                # ----- generate plots -----#
                 for img, label, img_id in zip(pred, label, image_id):
-                    # Image.fromarray(img.cpu().numpy().astype(np.int16)).save(
-                    #     os.path.join(self.save_folder, img_id + ".png")
-                    # )
-                    import matplotlib.pyplot as plt
-
                     plt.figure(figsize=(4, 8))
                     plt.subplot(1, 2, 1)
                     plt.imshow(label.cpu().numpy().squeeze())
                     plt.subplot(1, 2, 2)
                     plt.imshow(img.cpu().numpy().squeeze())
                     plt.savefig(os.path.join(self.save_folder, img_id + ".png"))
+                # --------------------------#
         for k, v in metrics.items():
             metrics[k] = [sum(v) / len(v)]
-
         metrics["IOU"].append(
             (metrics["Prec"][0] * metrics["Rec"][0])
             / (
@@ -238,8 +214,6 @@ class Inference:
     def main(
         self,
         task: str = "segmentation",
-        skip_exists: bool = True,
-        return_lst: bool = False,
         evaluate: bool = True,
     ):
         """
@@ -261,14 +235,6 @@ class Inference:
         self.model.to(torch.device("cuda:{}".format(self.gpu_ids[0])))
         self.model.eval()
         replicas = nn.parallel.replicate(self.model, self.gpu_ids)
-        df = None
-        csv_outdir = os.path.join(self.save_folder, "accuracy", f"{self.id}.csv")
-        if os.path.exists(csv_outdir):
-            os.remove(csv_outdir)
-        pred_outdir, prob_outdir = self.makedirs()
-        if os.path.exists(pred_outdir) and os.path.exists(prob_outdir) and skip_exists:
-            logger.info(f"the inference result already existed. Will skip")
-        self.data_type = "train" if evaluate else "test"
         cur_dataset = self.retrieve_dataset()
         if task == "segmentation":
             self.apply_segmentation(
@@ -278,30 +244,25 @@ class Inference:
 
 
 if __name__ == "__main__":
-    from deepspeed.utils.zero_to_fp32 import get_fp32_state_dict_from_zero_checkpoint
-    from omegaconf import OmegaConf
-
     cfg = OmegaConf.load(
         "/NAS3/Members/linchenxi/projects/foundation_model/model/finetune_dinov2_8/config.yaml"
     )
     name = cfg.MODEL_INFO.model_name
     save_folder = f"/NAS3/Members/linchenxi/projects/foundation_model/inference/{name}"
-    os.makedirs(os.path.join(save_folder, "result"), exist_ok=True)
-    os.makedirs(os.path.join(save_folder, "accuracy"), exist_ok=True)
+    os.makedirs(save_folder, exist_ok=True)
+    # load model
     model_path = f"/NAS3/Members/linchenxi/projects/foundation_model/model/{name}/best"  # noqa:E501
     m = Dinov2ForSemanticSegmentation(cfg=cfg)
     state_dict = get_fp32_state_dict_from_zero_checkpoint(model_path, tag="")
     m.load_state_dict(state_dict, strict=False)
     logger.info(f"now inferencing with {name}")
     gpu_ids = [0, 1, 2, 3, 4, 5, 6, 7]
-    cur_output_folder = os.path.join(save_folder)
-    if not os.path.exists(cur_output_folder):
-        os.makedirs(cur_output_folder)
+    # initialize the inference
     inferencer = Inference(
         model_instance=m,
         model_id=name,
         config=cfg,
-        save_folder=cur_output_folder,
+        save_folder=save_folder,
         gpu_ids=gpu_ids,
     )
-    inferencer.main(return_lst=True, skip_exists=False, evaluate=True)
+    inferencer.main()

@@ -17,8 +17,12 @@ from common.logger import logger
 # internal files
 from config.setup import default_setup
 from data.satlas import SemanticSegmentationDataset
-import main.trainer_deepspeed as trainer_deepspeed
-from models.customized_segmention_model import Dinov2ForSemanticSegmentation
+import trainer_deepspeed as trainer_deepspeed
+from rs_foundation_model.models.customized_segmention_model import (
+    Dinov2ForSemanticSegmentation,
+)
+
+torch.manual_seed(111)
 
 
 script_dir = os.path.dirname(__file__)  # Directory of the current script (main.py)
@@ -111,7 +115,7 @@ def execute():
         ),
     )
     logger.info(f"{len(vali_loader)}")
-    trainer = trainer_deepspeed.Trainer(net=model)
+    trainer = trainer_deepspeed.Trainer(net=model, config=config)
 
     trainer.train_model(
         epoch=config.MODEL.optimization.num_epoch,

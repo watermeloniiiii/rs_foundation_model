@@ -1,29 +1,26 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import os
-import main.trainer_deepspeed as trainer_deepspeed
-from torch.utils.data import DataLoader
-import torch.nn as nn
-from transformers import (
-    SegformerImageProcessor,
-)
+# third-party libraries
 from accelerate import DistributedDataParallelKwargs
 from accelerate import Accelerator
-from common.logger import logger
 from deepspeed.utils.zero_to_fp32 import get_fp32_state_dict_from_zero_checkpoint
-import config.setup as config
+import os
+import torch.nn as nn
+from torch.utils.data import DataLoader
+from transformers import SegformerImageProcessor
+
+# PAII's library
+from common.logger import logger
+
+# internal files
+from config.setup import default_setup
 from data.sen1floods11 import Sen1FloodsDataset
-from models.customized_segmention_model import (
+import trainer_deepspeed as trainer_deepspeed
+from rs_foundation_model.models.customized_segmention_model import (
     Dinov2ForSemanticSegmentation,
 )
-from config.setup import default_setup
-
-from transformers import (
-    SegformerImageProcessor,
-)
-
-from models.dinov2_model import write_config
+from rs_foundation_model.models.dinov2_model import write_config
 
 
 def model_initialization(config):
@@ -127,31 +124,4 @@ def execute():
 
 
 if __name__ == "__main__":
-    # import subprocess
-
-    # if config.mode == "debug":
-    #     from accelerate import debug_launcher
-
-    #     debug_launcher(function=execute(), num_processes=1)
-    # else:
-
-    #     def launch_accelerate():
-    #         # Define the command to execute
-    #         command = [
-    #             "accelerate",
-    #             "launch",
-    #             "--config_file",
-    #             "/NAS6/Members/linchenxi/morocco/accelerate_deepspeed_config.yaml",
-    #             # "--main_process_ip",
-    #             # "localhost",
-    #             # "--main_process_port",
-    #             # "0",
-    #             "main_accelerate.py",
-    #         ]
-
-    #         # Execute the command
-    #         subprocess.run(command)
-
-    #     # Call the function to launch accelerate
-    #     launch_accelerate()
     execute()

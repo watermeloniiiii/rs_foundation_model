@@ -14,7 +14,7 @@ def default_setup(config):
     downstream = cfg.PROJECT.downstream
     model_idx = cfg.PROJECT.model_idx
     model_name = f"{task}_"
-    model_name += f"{pretrain}_" if pretrain else "np_"
+    model_name += f"{pretrain}_" if pretrain else "np_"  # np denotes no pretraining
     if downstream:
         model_name += downstream + "_"
     model_name += model_idx

@@ -193,7 +193,7 @@ class Trainer(object):
             return DummyScheduler(self.optimizer)
 
     def process_model(self, net, inputs, input_values, tensor_type):
-        if isinstance(net, DinoVisionTransformer):
+        if isinstance(net.module.dinov2.model, DinoVisionTransformer):
             # the regular vision transformer where we only need input from one source
             image = input_values[inputs.index("image")].type(tensor_type)
             label = input_values[inputs.index("label")].squeeze()
