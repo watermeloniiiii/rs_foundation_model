@@ -36,6 +36,8 @@ This repo implements the continued-pretraining and finetune based on the DINOv2 
           param.requires_grad = True
       model.classifier.classifier.weight_g.requires_grad = False
 ```
+
+`multimodel_test`: this is called test because now we have only gone through the entire pipeline but haven't applied it to the real downstream task. The logic is basically the same as in `satlas_multiclass` but simply replace the monomodal DINOv2 model with the multimodal DINOv2 model.
 ## <span style=color:#4DBBD5;font-size:15px;font-weight:bold>Code Structure</span>  
 ```text
 📦config
@@ -123,3 +125,17 @@ PRETRAIN:
 ---
 ## <span style=color:#4DBBD5;font-size:15px;font-weight:bold>Run the code</span>  
 <span style=font-size:13px;color:#00A087>
+
+1. To perform continued-pretraining with monomodal Satlas dataset
+
+```bash
+bash main/bash/satlas_multiclass.sh
+```
+2. To perform continued-pretraining with multimodal Sen12MS dataset
+```bash
+bash main/bash/multimodal_test.sh
+```
+3. To perform finetune with Sen1Floods11 dataset
+```bash
+bash main/bash/flood_prediction.sh
+```

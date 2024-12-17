@@ -112,11 +112,14 @@ class Dinov2ForSemanticSegmentation(nn.Module):
     def __init__(self, cfg, img_size=512, patch_size=16, save_cfg=True):
         super().__init__()
         self.config = cfg
+        # initialize the DINOv2 model
         self.dinov2 = DINOV2PretrainedModel(cfg, save_cfg=save_cfg)
         self.num_class = len(cfg.MODEL_INFO.class_of_interest) + 1
         if isinstance(self.dinov2.model, DinoVisionTransformer):
+            # monomodal
             self.hidden_size = self.dinov2.model.patch_embed.proj.out_channels
         else:
+            # multimodal
             self.hidden_size = self.dinov2.model.embed_dim[0]
         self.patch_size = self.dinov2.config.student.patch_size
         self.num_register = self.dinov2.config.student.num_register_tokens
@@ -136,7 +139,7 @@ class Dinov2ForSemanticSegmentation(nn.Module):
 
     def forward(self, pixel_values, labels=None, doy=None):
         if isinstance(self.dinov2.model, DinoVisionTransformer):
-            # will use the last four attention layers
+            # monomodal, will use the last four attention layers
             outputs = self.dinov2.model.get_intermediate_layers(
                 pixel_values, 4, doy=doy
             )
@@ -151,7 +154,7 @@ class Dinov2ForSemanticSegmentation(nn.Module):
                 align_corners=False,
             )
         else:
-            # only use the last layer
+            # multimodal, only use the last layer
             outputs = self.dinov2.model(
                 pixel_values[0], pixel_values[1], is_training=True, doy=doy
             )

@@ -1,17 +1,23 @@
-import torch
-import torch.nn as nn
+# @author: Chenxi Lin
+
+import logging
 from omegaconf import OmegaConf
 import os
+import torch
+import torch.backends.cudnn as cudnn
+import torch.nn as nn
+from typing import Any, Tuple
+
 import dinov2.distributed as distributed
+from dinov2.eval.setup import build_model_for_eval
 from dinov2.logging_dinov2 import setup_logging
 from dinov2.utils import utils
-import logging
-from typing import Any, Tuple
-import torch.backends.cudnn as cudnn
-from dinov2.eval.setup import build_model_for_eval, get_autocast_dtype
 
 
 def default_setup(cfg):
+    """
+    Copied from DINOv2 repo
+    """
     seed = getattr(cfg, "seed", 0)
     rank = distributed.get_global_rank()
 
@@ -27,6 +33,9 @@ def default_setup(cfg):
 
 
 def write_config(cfg, output_dir, name="config.yaml"):
+    """
+    Copied from DINOv2 repo
+    """
     logger.info(OmegaConf.to_yaml(cfg))
     saved_cfg_path = os.path.join(output_dir, name)
     with open(saved_cfg_path, "w") as f:
@@ -36,7 +45,7 @@ def write_config(cfg, output_dir, name="config.yaml"):
 
 def setup(cfg, save_cfg=True):
     """
-    Create configs and perform basic setups.
+    Copied from DINOv2 repo
     """
     cfg_dino = OmegaConf.load(cfg.PRETRAIN.cfg_dino)
     os.makedirs(cfg.PATH.log_outdir, exist_ok=True)
@@ -50,12 +59,14 @@ def setup(cfg, save_cfg=True):
 
 
 def setup_and_build_model(model_cfg, save_cfg=True) -> Tuple[Any, torch.dtype]:
+    """
+    Copied from DINOv2 repo
+    """
     cudnn.benchmark = True
     cfg_dino = setup(model_cfg, save_cfg)
     model = build_model_for_eval(
         cfg_dino, model_cfg.PROJECT.pretrain, model_cfg.PRETRAIN.weights_dino_pretrain
     )
-    autocast_dtype = get_autocast_dtype(cfg_dino)
     return model, cfg_dino
 
 
