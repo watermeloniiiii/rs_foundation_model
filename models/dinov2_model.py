@@ -1,4 +1,6 @@
-# @author: Chenxi Lin
+"""
+@authored by Chenxi Lin
+"""
 
 import logging
 from omegaconf import OmegaConf

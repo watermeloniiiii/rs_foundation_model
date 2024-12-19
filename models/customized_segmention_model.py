@@ -1,3 +1,7 @@
+"""
+@authored by Chenxi Lin
+"""
+
 from rs_foundation_model.models.dinov2_model import DINOV2PretrainedModel
 import torch
 import torch.nn as nn

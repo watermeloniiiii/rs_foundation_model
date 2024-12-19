@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-@authored by Chenxi
+@authored by Chenxi Lin
 """
 
 from accelerate.utils import DummyOptim, DummyScheduler

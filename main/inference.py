@@ -1,3 +1,7 @@
+"""
+@authored by Chenxi Lin
+"""
+
 import collections
 from deepspeed.utils.zero_to_fp32 import get_fp32_state_dict_from_zero_checkpoint
 import json
@@ -41,30 +45,6 @@ class Inference:
         num_workers=4,
         thread_num=2,
     ) -> None:
-        """
-        Initialization of the CropRecognition Inference class.
-        The result will be saved as tile inference result and save in save_folder path.
-        Currently, gpu_ids list must be given
-
-        Parameters
-        ----------
-        save_folder : str
-            Where to save the inference result. The save_folder must exist before initializing
-            the inference class
-        gpu_ids : Optional[Tuple[int]]
-            Which GPU to use, if not given, CPU will be used for inference.
-            Currently, only GPU inference is supported. If None is given as input, Exception will raise.
-        num_workers : int, optional
-            How many workers (processes) to use for building input data, by default 5
-        thread_num : int, optional
-            How many thread to use for extracting raster images, by default 15
-
-        Raises
-        ------
-        Exception
-            _description_
-        """
-
         if not os.path.exists(save_folder):
             raise Exception(
                 "Target folder not found, please create target folder first."
@@ -116,12 +96,9 @@ class Inference:
                     * input_values[0].shape[0],
                     return_prob=True,
                 )  # B, C, H, W
-                pred, prob = outputs
+                pred, _ = outputs
                 label = input_values[inputs.index("label")]
                 image_id = sample["image_id"]
-                # IOU_metric = MeanIoU(
-                #     num_classes=len(self.config.MODEL_INFO.class_of_interest) + 1
-                # ).cuda()
                 Precision_metric = MulticlassPrecision(
                     num_classes=len(self.config.MODEL_INFO.class_of_interest) + 1
                 ).cuda()
@@ -192,55 +169,17 @@ class Inference:
         )
         return cur_dataset
 
-    def makedirs(self):
-        os.makedirs(
-            os.path.join(self.save_folder, "result", f"{self.id}"),
-            exist_ok=True,
-        )
-        pred_outdir = os.path.join(
-            save_folder,
-            "result",
-            f"{self.id}",
-            f"{self.id}_pred.tif",
-        )
-        prob_outdir = os.path.join(
-            save_folder,
-            "result",
-            f"{self.id}",
-            f"{self.id}_prob.tif",
-        )
-        return pred_outdir, prob_outdir
-
     def main(
         self,
-        task: str = "segmentation",
-        evaluate: bool = True,
     ):
-        """
-        predict the AOI for specific crop type at specific year.
-        Output will be uint 16 raster. Number of label value will be 2 +
-        len(crop_type_list), where 0 is preserved as Nodata and 1 is preserved
-        as negative. The others follow the index of crop_type_list.
-
-        Parameters
-        ----------
-        model_path : str
-            Path the model parameter path, must be given. If model path doesn't
-            fit predefined model, exception will raise.
-
-        skip_exists: bool
-            Whether to skip the exists files.
-        """
-
         self.model.to(torch.device("cuda:{}".format(self.gpu_ids[0])))
         self.model.eval()
         replicas = nn.parallel.replicate(self.model, self.gpu_ids)
         cur_dataset = self.retrieve_dataset()
-        if task == "segmentation":
-            self.apply_segmentation(
-                replicas=replicas,
-                dataset=cur_dataset,
-            )
+        self.apply_segmentation(
+            replicas=replicas,
+            dataset=cur_dataset,
+        )
 
 
 if __name__ == "__main__":
@@ -250,13 +189,15 @@ if __name__ == "__main__":
     name = cfg.MODEL_INFO.model_name
     save_folder = f"/NAS3/Members/linchenxi/projects/foundation_model/inference/{name}"
     os.makedirs(save_folder, exist_ok=True)
+
     # load model
-    model_path = f"/NAS3/Members/linchenxi/projects/foundation_model/model/{name}/best"  # noqa:E501
+    model_path = f"/NAS3/Members/linchenxi/projects/foundation_model/model/{name}/best"
     m = Dinov2ForSemanticSegmentation(cfg=cfg)
     state_dict = get_fp32_state_dict_from_zero_checkpoint(model_path, tag="")
     m.load_state_dict(state_dict, strict=False)
     logger.info(f"now inferencing with {name}")
     gpu_ids = [0, 1, 2, 3, 4, 5, 6, 7]
+
     # initialize the inference
     inferencer = Inference(
         model_instance=m,

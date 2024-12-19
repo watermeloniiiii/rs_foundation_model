@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+"""
+@authored by Chenxi Lin
+"""
 
 # third-party libraries
 from accelerate import DistributedDataParallelKwargs
