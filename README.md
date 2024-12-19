@@ -139,3 +139,7 @@ bash main/bash/multimodal_test.sh
 ```bash
 bash main/bash/flood_prediction.sh
 ```
+4. To perform the inference on the flood prediction
+```bash
+python main/inference.py
+```
